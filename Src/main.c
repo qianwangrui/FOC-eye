@@ -20,6 +20,7 @@
 #include "main.h"
 #include "qwr_FOC_peri_init.h"
 
+
 /** @addtogroup STM32G4xx_HAL_Examples
   * @{
   */
@@ -58,8 +59,6 @@ int main(void)
 
   /* Configure the System clock to have a frequency of 170 MHz */
   SystemClock_Config();
-
-
   FOC_GPIO_Init();
   FOC_TIM1_PWM_Init();
 
@@ -100,6 +99,7 @@ static void SystemClock_Config(void)
 
   /* Activate PLL with HSI as source */
   RCC_OscInitStruct.OscillatorType      = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState            = RCC_HSE_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.HSIState            = RCC_HSI_ON;
   RCC_OscInitStruct.PLL.PLLState        = RCC_PLL_ON;

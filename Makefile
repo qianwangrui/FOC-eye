@@ -5,6 +5,7 @@
 #   make clean
 #   make flash          # flash with st-flash (stlink-tools)
 #   make flash-cube     # flash with STM32_Programmer_CLI (CubeProgrammer)
+#   make flash-ocd      # flash with OpenOCD + ST-Link
 # ------------------------------------------------------------------------------
 
 TARGET      ?= FOC_eye
@@ -112,6 +113,9 @@ flash: $(BUILD_DIR)/$(TARGET).bin
 flash-cube: $(BUILD_DIR)/$(TARGET).elf
 	STM32_Programmer_CLI -c port=SWD -w $< -rst
 
+flash-ocd: $(BUILD_DIR)/$(TARGET).elf
+	openocd -f interface/stlink.cfg -f target/stm32g4x.cfg -c "program $< verify reset exit"
+
 -include $(wildcard $(BUILD_DIR)/*.d)
 
-.PHONY: all clean flash flash-cube
+.PHONY: all clean flash flash-cube flash-ocd

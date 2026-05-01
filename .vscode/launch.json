@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "OpenOCD Debug",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "openocd",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/FOC_eye.elf",
+            "configFiles": [
+                "interface/stlink.cfg",
+                "target/stm32g4x.cfg"
+            ],
+            "svdFile": "${workspaceFolder}/.vscode/STM32G431xx.svd",
+            "runToEntryPoint": "main",
+            "breakAfterReset": true,
+            "preLaunchTask": "build",
+            "device": "STM32G431RB",
+            "gdbPath": "gdb-multiarch",
+            "toolchainPrefix": "arm-none-eabi",
+            "objdumpPath": "/usr/bin/arm-none-eabi-objdump"
+        }
+    ]
+}

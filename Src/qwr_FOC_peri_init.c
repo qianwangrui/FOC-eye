@@ -2,9 +2,11 @@
 
 TIM_HandleTypeDef htim1;
 
-void FOC_GPIO_Init(void)
+
+ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef *htim)
 {
     __HAL_RCC_GPIOA_CLK_ENABLE();
+	__HAL_RCC_TIM1_CLK_ENABLE();
 
     GPIO_InitTypeDef gpio = {0};
     gpio.Pin       = GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10;
@@ -14,15 +16,17 @@ void FOC_GPIO_Init(void)
     gpio.Alternate = GPIO_AF6_TIM1;
     HAL_GPIO_Init(GPIOA, &gpio);
 }
- void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef *htim)
-{
-  FOC_GPIO_Init();
-}
 
+
+void FOC_GPIO_Init(void)
+{
+    /* TIM1 PWM 引脚(PA8/PA9/PA10)已在 HAL_TIM_PWM_MspInit 中初始化 */
+    /* 此处可添加其他 GPIO 初始化，如 LED、使能脚等 */
+}
 
 void FOC_TIM1_PWM_Init(void)
 {
-    __HAL_RCC_TIM1_CLK_ENABLE();
+
 
     /* 时基配置 */
     htim1.Instance               = TIM1;
@@ -37,7 +41,7 @@ void FOC_TIM1_PWM_Init(void)
     /* 通道配置 */
     TIM_OC_InitTypeDef oc = {0};
     oc.OCMode       = TIM_OCMODE_PWM1;
-    oc.Pulse        = 0;
+    oc.Pulse        = 2125;
     oc.OCPolarity   = TIM_OCPOLARITY_HIGH;
     oc.OCNPolarity  = TIM_OCNPOLARITY_HIGH;
     oc.OCIdleState  = TIM_OCIDLESTATE_RESET;
