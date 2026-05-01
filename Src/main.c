@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "qwr_FOC_peri_init.h"
+#include "qwr_MT6701_driver.h"
 
 
 /** @addtogroup STM32G4xx_HAL_Examples
@@ -61,10 +62,12 @@ int main(void)
   SystemClock_Config();
   FOC_GPIO_Init();
   FOC_TIM1_PWM_Init();
-
+  MT6701_GPIO_Init();
+  MT6701_SPI_Init();
   /* Infinite loop */
   while (1)
   {
+    volatile float angle = MT6701_GetAngleDeg();  // 0.0 ~ 359.978
   }
 }
 
