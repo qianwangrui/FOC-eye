@@ -18,8 +18,11 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include <stdio.h>
 #include "qwr_FOC_peri_init.h"
 #include "qwr_MT6701_driver.h"
+#include "qwr_INA240_driver.h"
+#include "qwr_uart_driver.h"
 
 
 /** @addtogroup STM32G4xx_HAL_Examples
@@ -62,12 +65,25 @@ int main(void)
   SystemClock_Config();
   FOC_GPIO_Init();
   FOC_TIM1_PWM_Init();
-  MT6701_GPIO_Init();
-  MT6701_SPI_Init();
+  MT6701_SPI_Init();  /* HAL_SPI_MspInit 会在内部自动配置 GPIO */
+  INA240_GPIO_Init();
+  INA240_ADC_Init();
+  UART1_Init();
+
+  printf("\r\n=== FOC_eye boot ===\r\n");
+
   /* Infinite loop */
   while (1)
   {
-    volatile float angle = MT6701_GetAngleDeg();  // 0.0 ~ 359.978
+    float   angle  = MT6701_GetAngleDeg();
+    uint8_t status = MT6701_GetStatus();
+    float   iu     = INA240_ReadCurrent_IU();
+    float   iv     = INA240_ReadCurrent_IV();
+
+    printf("angle=%7.2f deg | status=0x%02X | iu=%6.3f A | iv=%6.3f A\r\n",
+           angle, status, iu, iv);
+
+    HAL_Delay(100);
   }
 }
 

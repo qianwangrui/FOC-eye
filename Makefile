@@ -62,7 +62,7 @@ ASM_SOURCES = Startup/startup_stm32g431xx.s
 LDSCRIPT    = STM32G431RBTX_FLASH.ld
 LIBS        = -lc -lm -lnosys
 LIBDIR      =
-LDFLAGS     = $(MCU) -specs=nano.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) \
+LDFLAGS     = $(MCU) -specs=nano.specs -u _printf_float -T$(LDSCRIPT) $(LIBDIR) $(LIBS) \
               -Wl,-Map=$(BUILD_DIR)/$(TARGET).map,--cref \
               -Wl,--gc-sections -static \
               -Wl,--start-group -lc -lm -Wl,--end-group
@@ -113,9 +113,20 @@ flash: $(BUILD_DIR)/$(TARGET).bin
 flash-cube: $(BUILD_DIR)/$(TARGET).elf
 	STM32_Programmer_CLI -c port=SWD -w $< -rst
 
+OPENOCD = /opt/openocd-0.12/bin/openocd
+
 flash-ocd: $(BUILD_DIR)/$(TARGET).elf
-	openocd -f interface/stlink.cfg -f target/stm32g4x.cfg -c "program $< verify reset exit"
+	$(OPENOCD) -f interface/stlink.cfg -f target/stm32g4x.cfg -c "program $< verify reset exit"
+
+flash-dap: $(BUILD_DIR)/$(TARGET).elf
+	$(OPENOCD) -f interface/cmsis-dap.cfg -f target/stm32g4x.cfg -c "program $< verify reset exit"
+
+# Open serial terminal (DAPLink VCP). Exit: Ctrl-T then Q
+SERIAL_PORT ?= /dev/ttyACM0
+SERIAL_BAUD ?= 115200
+serial:
+	tio -b $(SERIAL_BAUD) $(SERIAL_PORT)
 
 -include $(wildcard $(BUILD_DIR)/*.d)
 
-.PHONY: all clean flash flash-cube flash-ocd
+.PHONY: all clean flash flash-cube flash-ocd flash-dap serial

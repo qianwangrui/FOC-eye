@@ -2,16 +2,17 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "OpenOCD Debug",
+            "name": "DAPLink Debug",
             "type": "cortex-debug",
             "request": "launch",
             "servertype": "openocd",
             "cwd": "${workspaceFolder}",
             "executable": "${workspaceFolder}/build/FOC_eye.elf",
             "configFiles": [
-                "interface/stlink.cfg",
+                "interface/cmsis-dap.cfg",
                 "target/stm32g4x.cfg"
             ],
+            "serverpath": "/opt/openocd-0.12/bin/openocd",
             "svdFile": "${workspaceFolder}/.vscode/STM32G431xx.svd",
             "runToEntryPoint": "main",
             "breakAfterReset": true,
