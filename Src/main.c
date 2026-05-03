@@ -23,6 +23,7 @@
 #include "qwr_MT6701_driver.h"
 #include "qwr_INA240_driver.h"
 #include "qwr_uart_driver.h"
+#include "qwr_FOC.h"
 
 
 /** @addtogroup STM32G4xx_HAL_Examples
@@ -70,20 +71,40 @@ int main(void)
   INA240_ADC_Init();
   UART1_Init();
 
-  printf("\r\n=== FOC_eye boot ===\r\n");
+  /* No boot banner: VOFA+ FireWater would try to parse it as data. */
+
+  float    theta    = 0.0f;
+  uint32_t plot_cnt = 0;
 
   /* Infinite loop */
   while (1)
   {
-    float   angle  = MT6701_GetAngleDeg();
-    uint8_t status = MT6701_GetStatus();
-    float   iu     = INA240_ReadCurrent_IU();
-    float   iv     = INA240_ReadCurrent_IV();
+    FOC_OpenLoopUpdate(theta, 0.0f, 1.0f);
 
-    printf("angle=%7.2f deg | status=0x%02X | iu=%6.3f A | iv=%6.3f A\r\n",
-           angle, status, iu, iv);
+    theta += 0.5f;
+    if (theta > 6.283185f) theta -= 6.283185f;
 
-    HAL_Delay(100);
+    /* VOFA+ FireWater protocol: comma-separated floats + '\n'.
+     * Print every 5 iterations (~200 Hz) to fit 115200 baud. */
+    if (++plot_cnt >= 5) {
+      plot_cnt = 0;
+      /* Display-only vertical offsets so waveforms are stacked like
+       * scope channels and don't overlap. Real values unaffected. */
+      const float OFFSET_THETA  = -4.0f;   /* bottom lane */
+      const float OFFSET_AB     =  0.0f;   /* middle lane (alpha/beta) */
+      const float OFFSET_UVW    = +4.0f;   /* top lane    (u/v/w) */
+
+      float theta_scaled = g_foc.theta_elec * (0.6f / 6.283185f) - 0.3f;
+      printf("%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n",
+             theta_scaled       + OFFSET_THETA,
+             g_foc.Valpha       + OFFSET_AB,
+             g_foc.Vbeta        + OFFSET_AB,
+             g_foc.Vu           + OFFSET_UVW,
+             g_foc.Vv           + OFFSET_UVW,
+             g_foc.Vw           + OFFSET_UVW);
+    }
+
+    HAL_Delay(1);
   }
 }
 
