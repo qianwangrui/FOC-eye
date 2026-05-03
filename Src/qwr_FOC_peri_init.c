@@ -64,6 +64,12 @@ void FOC_TIM1_PWM_Init(void)
     HAL_TIMEx_ConfigBreakDeadTime(&htim1, &bdt);
 #endif
 
+    /* Configure TIM1 update interrupt priority (used by FOC closed-loop ISR).
+     * The interrupt source (UIE) is enabled later by FOC_StartClosedLoopISR()
+     * so that it does not fire during alignment. */
+    HAL_NVIC_SetPriority(TIM1_UP_TIM16_IRQn, 1, 0);
+    HAL_NVIC_EnableIRQ(TIM1_UP_TIM16_IRQn);
+
     /* 启动三路 PWM */
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
