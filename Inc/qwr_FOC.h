@@ -55,7 +55,7 @@
  *   0.47 ≈ -3 dB cutoff around 2.0 kHz   (alpha = 1 - exp(-2*pi*fc/fs))
  *   0.27 ≈ -3 dB cutoff around 1.0 kHz
  *   0.03 ≈ -3 dB cutoff around 100 Hz    (heavy smoothing, detune pi_d/q) */
-#define FOC_VDQ_LPF_ALPHA    0.7f
+#define FOC_VDQ_LPF_ALPHA    1.0f
 
 /* =========================  Data structures  ========================= */
 

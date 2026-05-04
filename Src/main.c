@@ -183,7 +183,7 @@ int main(void)
   g_foc.id_ref = 0.0f;
   g_foc.iq_ref = 0.0f;
   FOC_StartClosedLoopISR();
-  FOC_EnablePositionMode(0.008f, 0.000f, 0.0001f, 0.3f);
+  FOC_EnablePositionMode(0.008f, 0.000f, 0.000f, 0.3f);
 
   /* Set initial target = current position (motor holds still). */
   /* Change g_foc.pos_ref_deg at run-time to command a new angle. */

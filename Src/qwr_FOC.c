@@ -167,7 +167,7 @@ void FOC_Init(void)
      *   - Kp too large -> oscillation, beeping
      *   - Ki too large -> overshoot
      * Output is normalised voltage fraction ([-1,+1] = full bus/2 swing). */
-    PI_Init(&g_foc.pi_d, 4.0f, 200.0f, 0.5f);   /* d-axis */
+    PI_Init(&g_foc.pi_d, 2.0f, 200.0f, 0.5f);   /* d-axis */
     PI_Init(&g_foc.pi_q, 2.0f, 3.0f, 0.9f);   /* q-axis */
 }
 

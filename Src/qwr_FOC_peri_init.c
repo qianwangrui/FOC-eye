@@ -38,6 +38,17 @@ void FOC_TIM1_PWM_Init(void)
     htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
     HAL_TIM_PWM_Init(&htim1);
 
+    /* Master mode: emit TRGO on every update event (PWM 谷底, center-aligned 1).
+     * This synchronously triggers ADC1 to sample at the moment all low-side
+     * MOSFETs are conducting (counter == 0), where the INA240 outputs are
+     * settled and free of switching noise. */
+    {
+        TIM_MasterConfigTypeDef masterCfg = {0};
+        masterCfg.MasterOutputTrigger = TIM_TRGO_UPDATE;
+        masterCfg.MasterSlaveMode     = TIM_MASTERSLAVEMODE_DISABLE;
+        HAL_TIMEx_MasterConfigSynchronization(&htim1, &masterCfg);
+    }
+
     /* 通道配置 */
     TIM_OC_InitTypeDef oc = {0};
     oc.OCMode       = TIM_OCMODE_PWM1;
