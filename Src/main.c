@@ -176,35 +176,6 @@ int main(void)
   FOC_Init();           /* gains, state defaults */
   FOC_AlignRotor();     /* sweep + hold to record encoder zero offset */
 
-  /* ---------- Sanity-check open-loop spin (debug) ----------
-   * Spin the field very slowly for ~10 seconds at Vq=0.3 with no encoder
-   * feedback. Watch the rotor and count how many times it goes around
-   * during this window: that gives you POLE PAIRS directly.
-   *
-   * theta increments 0.005 rad per ms = 5 rad/s electrical.
-   * Time for one full electrical revolution = 2*pi / 5 ≈ 1.26 s.
-   * In 10 s you get ~7.95 electrical revolutions.
-   * Mechanical revolutions in 10 s = 7.95 / pole_pairs.
-   *   PP = 7  -> ~1.14 mech rev    (visible: clearly more than 1 turn)
-   *   PP = 11 -> ~0.72 mech rev    (less than one turn)
-   *   PP = 14 -> ~0.57 mech rev    (about half turn)
-   * Set DEBUG_OPEN_LOOP_SECONDS to 0 once you trust the closed loop. */
-  #define DEBUG_OPEN_LOOP_SECONDS 1
-  if (DEBUG_OPEN_LOOP_SECONDS > 0) {
-      float theta_dbg = 0.0f;
-      const uint32_t t_end_dbg = HAL_GetTick()
-                                 + (uint32_t)(DEBUG_OPEN_LOOP_SECONDS * 1000);
-      while ((int32_t)(HAL_GetTick() - t_end_dbg) < 0) {
-          FOC_OpenLoopUpdate(theta_dbg, 0.0f, 0.3f);
-          theta_dbg += 0.005f;
-          if (theta_dbg > 6.283185f) theta_dbg -= 6.283185f;
-          HAL_Delay(1);
-      }
-      /* Re-align after the open-loop spin so theta_offset matches the new
-       * resting position before closed loop takes over. */
-      FOC_AlignRotor();
-  }
-
   /* Start current-loop ISR, then enable position-loop on top.
    * pos_Kp  : torque per degree of error  (A/deg)
    * pos_Ki  : integral gain               (A/(deg·s))
@@ -212,13 +183,12 @@ int main(void)
   g_foc.id_ref = 0.0f;
   g_foc.iq_ref = 0.0f;
   FOC_StartClosedLoopISR();
-  FOC_EnablePositionMode(0.005f, 0.0005f, 0.0005f, 0.3f);
+  FOC_EnablePositionMode(0.008f, 0.000f, 0.0001f, 0.3f);
 
   /* Set initial target = current position (motor holds still). */
   /* Change g_foc.pos_ref_deg at run-time to command a new angle. */
 
   uint32_t next_plot = HAL_GetTick();
-  uint32_t next_step = HAL_GetTick() + 3000;  /* first step after 3 s */
 
   /* Infinite loop — telemetry only; control runs in TIM1 update ISR. */
   while (1)
@@ -231,28 +201,28 @@ int main(void)
       next_plot = now + 10;
 
       /* VOFA+ channels (comma-separated, FireWater protocol):
-       *  0: pos_ref   (deg, scaled /360 for display)
-       *  1: pos_actual (deg, scaled /360)
-       *  2: iq_ref    (A, from position PI)
-       *  3: iq        (A, actual)
-       *  4: Vq        (normalised) */
-      printf("%.4f,%.4f,%.4f,%.4f,%.4f\n",
-             g_foc.pos_ref_deg    / 360.0f,
-             g_foc.theta_mech_deg / 360.0f,
+       *  0: pos_ref     (deg)
+       *  1: pos_actual  (deg)
+       *  2: err         (deg, ref - actual, wrapped to ±180)
+       *  3: iq_ref      (A)
+       *  4: iq          (A)
+       *  5: id          (A, should be ~0; deviation = noise floor)
+       *  6: iu          (A, raw INA240 phase U)
+       *  7: iv          (A, raw INA240 phase V) */
+      float err_diag = g_foc.pos_ref_deg - g_foc.theta_mech_deg;
+      while (err_diag >  180.0f) err_diag -= 360.0f;
+      while (err_diag < -180.0f) err_diag += 360.0f;
+      printf("%.1f,%.1f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+             g_foc.pos_ref_deg,
+             g_foc.theta_mech_deg,
+             err_diag,
              g_foc.iq_ref,
              g_foc.iq,
-             g_foc.Vq);
+             g_foc.id,
+             g_foc.iu,
+             g_foc.iv);
     }
 
-    /* Position step demo: toggle +90° every 3 seconds.
-     * Replace this with your own setpoint source (UART, etc.). */
-    if ((int32_t)(now - next_step) >= 0) {
-      next_step = now + 3000;
-      static float target = 0.0f;
-      target += 90.0f;
-      if (target >= 360.0f) target -= 360.0f;
-      g_foc.pos_ref_deg = target;
-    }
   }
 }
 

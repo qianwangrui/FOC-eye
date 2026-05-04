@@ -68,6 +68,19 @@ static inline uint32_t volt_to_ccr(float v)
     return (uint32_t)(duty * FOC_PWM_PERIOD);
 }
 
+/* First-order IIR low-pass state for the dq-axis voltage commands.
+ * Applied at FOC_CONTROL_FREQ_HZ (20 kHz) inside FOC_ClosedLoopUpdate,
+ * after the PI controllers and before park_inv. */
+static float s_Vd_f = 0.0f, s_Vq_f = 0.0f;
+
+/* Reset the Vd/Vq low-pass filter state (call when motor output is
+ * disabled or realigned, to avoid a startup transient). */
+static inline void vdq_lpf_reset(void)
+{
+    s_Vd_f = 0.0f;
+    s_Vq_f = 0.0f;
+}
+
 /* Write Vu/Vv/Vw to PWM and save everything to g_foc telemetry. */
 static void foc_write_output(float theta_elec, float Vd, float Vq,
                              float Valpha, float Vbeta,
@@ -188,6 +201,9 @@ void FOC_AlignRotor(void)
     const uint32_t SWEEP_STEPS = 600;
     const uint32_t STEP_MS     = 3;          /* slow enough for rotor to follow */
 
+    /* Start from a clean filter state so the first PWM write is not biased. */
+    vdq_lpf_reset();
+
     /* Stage 1: sweep from 2*pi down to 0, so final position is at 0. */
     for (uint32_t i = 0; i <= SWEEP_STEPS; ++i) {
         float t = TWO_PI * (float)(SWEEP_STEPS - i) / (float)SWEEP_STEPS;
@@ -261,6 +277,17 @@ void FOC_ClosedLoopUpdate(float id_ref, float iq_ref, float dt)
         g_foc.pi_q.integral *= scale;
     }
 
+    /* 5b. One-pole low-pass on Vd/Vq to smooth the voltage command.
+     * Done in the dq frame so it does not rotate the applied voltage
+     * vector's electrical angle. See FOC_VDQ_LPF_ALPHA in qwr_FOC.h. */
+    {
+        const float a = FOC_VDQ_LPF_ALPHA;
+        s_Vd_f += a * (Vd - s_Vd_f);
+        s_Vq_f += a * (Vq - s_Vq_f);
+        Vd = s_Vd_f;
+        Vq = s_Vq_f;
+    }
+
     /* 6. Inverse Park + Clarke -> PWM. */
     float Valpha, Vbeta, Vu, Vv, Vw;
     park_inv(Vd, Vq, theta, &Valpha, &Vbeta);
@@ -311,7 +338,9 @@ void TIM1_UP_TIM16_IRQHandler(void)
                 g_foc.vel_deg_s = d_angle / FOC_POS_DT;
 
                 /* PID: PI on position error, minus Kd * velocity. */
-                float err = wrap_180(g_foc.pos_ref_deg - g_foc.theta_mech_deg);
+                /* Shortest-path wrap disabled: use raw error. */
+                float err = g_foc.pos_ref_deg - g_foc.theta_mech_deg;
+                /* float err = wrap_180(g_foc.pos_ref_deg - g_foc.theta_mech_deg); */
                 float out = PI_Update(&g_foc.pi_pos, err, FOC_POS_DT)
                             - g_foc.pos_Kd * g_foc.vel_deg_s;
 

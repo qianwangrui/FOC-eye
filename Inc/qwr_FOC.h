@@ -38,6 +38,25 @@
 #define FOC_POS_DECIMATION   20U
 #define FOC_POS_DT           (FOC_CONTROL_DT * FOC_POS_DECIMATION)
 
+/* First-order IIR low-pass filter on the dq-axis voltage commands
+ * (Vd, Vq), applied AFTER the PI controllers and BEFORE park_inv.
+ * Runs at FOC_CONTROL_FREQ_HZ (20 kHz).
+ *
+ *   y[n] = y[n-1] + alpha * (x[n] - y[n-1])
+ *
+ * Filtering in the dq frame (not the UVW frame) is safe because:
+ *   - Vd/Vq are DC in steady state, so the filter does not bend the
+ *     electrical angle of the applied voltage vector.
+ *   - Only the magnitude response of the current loop is affected;
+ *     phase on the applied stator voltage is preserved.
+ *
+ * alpha in (0, 1]:
+ *   1.0  = no filtering (pass-through)
+ *   0.47 ≈ -3 dB cutoff around 2.0 kHz   (alpha = 1 - exp(-2*pi*fc/fs))
+ *   0.27 ≈ -3 dB cutoff around 1.0 kHz
+ *   0.03 ≈ -3 dB cutoff around 100 Hz    (heavy smoothing, detune pi_d/q) */
+#define FOC_VDQ_LPF_ALPHA    0.7f
+
 /* =========================  Data structures  ========================= */
 
 /* Simple anti-windup PI controller (symmetric output clamp). */
