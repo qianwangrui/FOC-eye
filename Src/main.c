@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include "qwr_FOC_peri_init.h"
 #include "qwr_MT6701_driver.h"
 #include "qwr_INA240_driver.h"
@@ -183,44 +184,60 @@ int main(void)
   g_foc.id_ref = 0.0f;
   g_foc.iq_ref = 0.0f;
   FOC_StartClosedLoopISR();
-  FOC_EnablePositionMode(0.008f, 0.000f, 0.000f, 0.3f);
-
+  FOC_EnablePositionMode(0.05f, 0.000f, 0.0001f, 1.0f);
+  //g_foc.pos_ref_deg = 30.0f;
   /* Set initial target = current position (motor holds still). */
   /* Change g_foc.pos_ref_deg at run-time to command a new angle. */
 
+  /* Start bare-metal RXNE interrupt -> ring buffer for UART commands. */
+  UART1_StartCmdRx();
+
+  char    cmd_buf[32];
+  uint8_t cmd_idx = 0;
+
   uint32_t next_plot = HAL_GetTick();
 
-  /* Infinite loop — telemetry only; control runs in TIM1 update ISR. */
+  /* Infinite loop — telemetry + command RX; control runs in TIM1 update ISR. */
   while (1)
   {
-    uint32_t now = HAL_GetTick();
+    /* ---- Drain RX ring buffer (filled by USART1 ISR, never lost) ---- */
+    int b;
+    while ((b = UART1_GetByte()) >= 0) {
+      char c = (char)b;
+      if (c == '\r' || c == '\n') {
+        if (cmd_idx > 0) {
+          cmd_buf[cmd_idx] = '\0';
+          float delta = strtof(cmd_buf, NULL);
+          g_foc.pos_ref_deg += delta;
+        }
+        cmd_idx = 0;
+      } else if (cmd_idx < sizeof(cmd_buf) - 1) {
+        cmd_buf[cmd_idx++] = c;
+      }
+    }
 
-    /* VOFA+ FireWater protocol at ~100 Hz (every 10 ms).
-     * 10 channels fit in 115200 baud at this rate. */
+    /* ---- Telemetry at ~100 Hz ---- */
+    uint32_t now = HAL_GetTick();
     if ((int32_t)(now - next_plot) >= 0) {
       next_plot = now + 10;
 
-      /* VOFA+ channels (comma-separated, FireWater protocol):
-       *  0: pos_ref     (deg)
-       *  1: pos_actual  (deg)
-       *  2: err         (deg, ref - actual, wrapped to ±180)
-       *  3: iq_ref      (A)
-       *  4: iq          (A)
-       *  5: id          (A, should be ~0; deviation = noise floor)
-       *  6: iu          (A, raw INA240 phase U)
-       *  7: iv          (A, raw INA240 phase V) */
       float err_diag = g_foc.pos_ref_deg - g_foc.theta_mech_deg;
       while (err_diag >  180.0f) err_diag -= 360.0f;
       while (err_diag < -180.0f) err_diag += 360.0f;
-      printf("%.1f,%.1f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
-             g_foc.pos_ref_deg,
-             g_foc.theta_mech_deg,
-             err_diag,
-             g_foc.iq_ref,
-             g_foc.iq,
-             g_foc.id,
-             g_foc.iu,
-             g_foc.iv);
+      extern volatile uint32_t g_uart_rx_cnt;
+      extern volatile uint32_t g_uart_isr_cnt;
+      /* PB7 idle = 1 (UART line HIGH). If 0 → pin not pulled up / floating.
+       * USART1_ISR bit5 RXNE: if stuck 1 → data arrived but ISR didn't fire.
+       * NVIC ISER[1] bit5: USART1_IRQn=37, 37-32=5 → must be 1.            */
+      uint32_t pb7_level = (GPIOB->IDR >> 7) & 1;
+      uint32_t usr_isr   = USART1->ISR;
+      uint32_t nvic_en   = (NVIC->ISER[1] >> 5) & 1;  /* USART1 IRQ enabled? */
+      printf("%lu,%lu,%lu,%lu,%lu\n",
+             (unsigned long)g_uart_isr_cnt,
+             (unsigned long)g_uart_rx_cnt,
+             (unsigned long)pb7_level,
+             (unsigned long)(usr_isr & 0xFF),
+             (unsigned long)nvic_en);
     }
 
   }
