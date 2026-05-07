@@ -70,7 +70,8 @@ int main(void)
   MT6701_SPI_Init();  /* HAL_SPI_MspInit 会在内部自动配置 GPIO */
   INA240_GPIO_Init();
   INA240_ADC_Init();
-  UART1_Init();
+  UART3_Init();        /* RX: command channel from host        */
+  UART1_Init();        /* TX: VOFA+ telemetry (printf goes here) */
 
   /* No boot banner: VOFA+ FireWater would try to parse it as data. */
 
@@ -172,37 +173,44 @@ int main(void)
       }
       /* Never reach here. */
   }
-
+  //顺时针编码器读数变小，逆时针变大
   /* ---------- Closed-loop FOC bring-up sequence ---------- */
   FOC_Init();           /* gains, state defaults */
-  FOC_AlignRotor();     /* sweep + hold to record encoder zero offset */
 
+  /* Pre-calibrated electrical offset, measured once with FOC_AlignRotor()
+   * and stored in Flash via this const (lives in .rodata). Skip the live
+   * alignment so boot is instant and the motor does not jerk. If you ever
+   * remount the rotor / encoder, re-run alignment and update this value. */
+  static const float CAL_THETA_OFFSET = 0.09f;
+  FOC_SetCalibratedOffset(CAL_THETA_OFFSET);
+  //FOC_AlignRotor();
   /* Start current-loop ISR, then enable position-loop on top.
    * pos_Kp  : torque per degree of error  (A/deg)
    * pos_Ki  : integral gain               (A/(deg·s))
    * iq_max  : maximum torque command (A), = pi_pos.out_max */
   g_foc.id_ref = 0.0f;
-  g_foc.iq_ref = 0.0f;
+  g_foc.iq_ref = 0.8f;
   FOC_StartClosedLoopISR();
-  FOC_EnablePositionMode(0.05f, 0.000f, 0.0001f, 1.0f);
-  //g_foc.pos_ref_deg = 30.0f;
+  FOC_EnablePositionMode(0.025f, 0.000f, 0.0002f, 1.0f);
+  g_foc.pos_ref_deg = 10.0f;
   /* Set initial target = current position (motor holds still). */
   /* Change g_foc.pos_ref_deg at run-time to command a new angle. */
 
   /* Start bare-metal RXNE interrupt -> ring buffer for UART commands. */
-  UART1_StartCmdRx();
+  UART3_StartCmdRx();
 
   char    cmd_buf[32];
   uint8_t cmd_idx = 0;
 
   uint32_t next_plot = HAL_GetTick();
 
-  /* Infinite loop — telemetry + command RX; control runs in TIM1 update ISR. */
+  /* Infinite loop — telemetry + command RX at 5 Hz (200 ms period).
+   * Control loop runs independently in the TIM1 update ISR. */
   while (1)
   {
-    /* ---- Drain RX ring buffer (filled by USART1 ISR, never lost) ---- */
+    /* ---- Drain RX ring buffer (filled by USART3 ISR, never lost) ---- */
     int b;
-    while ((b = UART1_GetByte()) >= 0) {
+    while ((b = UART3_GetByte()) >= 0) {
       char c = (char)b;
       if (c == '\r' || c == '\n') {
         if (cmd_idx > 0) {
@@ -216,30 +224,23 @@ int main(void)
       }
     }
 
-    /* ---- Telemetry at ~100 Hz ---- */
+    /* ---- Telemetry at 5 Hz ---- */
     uint32_t now = HAL_GetTick();
     if ((int32_t)(now - next_plot) >= 0) {
-      next_plot = now + 10;
+      next_plot = now + 200;          /* 200 ms = 5 Hz */
 
-      float err_diag = g_foc.pos_ref_deg - g_foc.theta_mech_deg;
-      while (err_diag >  180.0f) err_diag -= 360.0f;
-      while (err_diag < -180.0f) err_diag += 360.0f;
-      extern volatile uint32_t g_uart_rx_cnt;
-      extern volatile uint32_t g_uart_isr_cnt;
-      /* PB7 idle = 1 (UART line HIGH). If 0 → pin not pulled up / floating.
-       * USART1_ISR bit5 RXNE: if stuck 1 → data arrived but ISR didn't fire.
-       * NVIC ISER[1] bit5: USART1_IRQn=37, 37-32=5 → must be 1.            */
-      uint32_t pb7_level = (GPIOB->IDR >> 7) & 1;
-      uint32_t usr_isr   = USART1->ISR;
-      uint32_t nvic_en   = (NVIC->ISER[1] >> 5) & 1;  /* USART1 IRQ enabled? */
-      printf("%lu,%lu,%lu,%lu,%lu\n",
-             (unsigned long)g_uart_isr_cnt,
-             (unsigned long)g_uart_rx_cnt,
-             (unsigned long)pb7_level,
-             (unsigned long)(usr_isr & 0xFF),
-             (unsigned long)nvic_en);
+      uint16_t raw = MT6701_ReadAngle_SSI();
+      float    deg = (float)raw / 16384.0f * 360.0f;
+      /* VOFA channels: raw14, deg, theta_offset, id_ref, id, iq_ref, iq */
+      printf("%u,%f,%f,%f,%f,%f,%f\n",
+             (unsigned)raw,
+             (double)deg,
+             (double)g_foc.theta_offset,
+             (double)g_foc.id_ref,
+             (double)g_foc.id,
+             (double)g_foc.iq_ref,
+             (double)g_foc.iq);
     }
-
   }
 }
 

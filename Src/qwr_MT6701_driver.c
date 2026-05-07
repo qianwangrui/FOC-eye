@@ -42,7 +42,12 @@ void MT6701_SPI_Init(void)
     hspi1.Init.Mode              = SPI_MODE_MASTER;
     hspi1.Init.Direction         = SPI_DIRECTION_2LINES_RXONLY;
     hspi1.Init.DataSize          = SPI_DATASIZE_8BIT;
-    hspi1.Init.CLKPolarity       = SPI_POLARITY_HIGH;
+    /* MT6701 SSI timing: D13 appears on MISO immediately after CSN goes low.
+     * Verified empirically: SPI Mode 1 (CPOL=LOW, CPHA=2EDGE) is the
+     * configuration that captures D13 as the MSB. Mode 3 (original) and
+     * Mode 2 both shift the frame by 1 bit and leave MSB stuck at 1 →
+     * angle reading restricted to 180–360°. */
+    hspi1.Init.CLKPolarity       = SPI_POLARITY_LOW;
     hspi1.Init.CLKPhase          = SPI_PHASE_2EDGE;
     hspi1.Init.NSS               = SPI_NSS_SOFT;
     hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;

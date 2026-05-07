@@ -8,7 +8,7 @@
 #define FOC_PWM_PERIOD   4250U
 
 /* Motor constants - adjust if you change motors. */
-#define FOC_POLE_PAIRS   14U      /* Verified: 10 s open-loop @ 5 rad/s = ~8 elec
+#define FOC_POLE_PAIRS   7U      /* Verified: 10 s open-loop @ 5 rad/s = ~8 elec
                                    * revs producing ~0.5 mech rev  =>  PP ~= 14
                                    * (typical 28-magnet gimbal motor). */
 
@@ -25,8 +25,8 @@
 
 /* Rotor alignment parameters (open-loop pre-pulse that locks rotor to a known
  * electrical angle, so we can capture the encoder zero offset). */
-#define FOC_ALIGN_VD     0.20f    /* small d-axis voltage to pull rotor */
-#define FOC_ALIGN_TIME_MS 1500U   /* hold long enough for rotor to settle */
+#define FOC_ALIGN_VD     0.40f    /* small d-axis voltage to pull rotor */
+#define FOC_ALIGN_TIME_MS 4000U   /* hold long enough for rotor to settle */
 
 /* Closed-loop control frequency when running from TIM1 update interrupt.
  * Center-aligned PWM with RCR=1 → interrupt once per PWM cycle ≈ 20 kHz. */
@@ -149,6 +149,12 @@ float FOC_UpdateElectricalAngle(void);
  * subsequent encoder readings map to theta_elec correctly.
  * After return, outputs are zero and g_foc.aligned = 1. */
 void FOC_AlignRotor(void);
+
+/* Skip live alignment and use a previously calibrated electrical-angle
+ * offset (radians, [0, 2*pi)). Stores it into g_foc.theta_offset and
+ * sets g_foc.aligned = 1. Use this when the rotor + encoder mounting
+ * is fixed and you have measured theta_offset once already. */
+void FOC_SetCalibratedOffset(float theta_offset_rad);
 
 /* One control cycle of closed-loop current control:
  *   1. Read encoder -> theta_elec

@@ -167,8 +167,8 @@ void FOC_Init(void)
      *   - Kp too large -> oscillation, beeping
      *   - Ki too large -> overshoot
      * Output is normalised voltage fraction ([-1,+1] = full bus/2 swing). */
-    PI_Init(&g_foc.pi_d, 2.0f, 200.0f, 0.5f);   /* d-axis */
-    PI_Init(&g_foc.pi_q, 2.0f, 3.0f, 0.9f);   /* q-axis */
+    PI_Init(&g_foc.pi_d, 1.0f, 5.0f, 0.5f);   /* d-axis */
+    PI_Init(&g_foc.pi_q, 2.0f, 0.0f, 0.9f);   /* q-axis */
 }
 
 float FOC_UpdateElectricalAngle(void)
@@ -228,6 +228,18 @@ void FOC_AlignRotor(void)
     FOC_OpenLoopUpdate(0.0f, 0.0f, 0.0f);
 
     /* Clear integrators so closed-loop starts clean. */
+    PI_Reset(&g_foc.pi_d);
+    PI_Reset(&g_foc.pi_q);
+}
+
+void FOC_SetCalibratedOffset(float theta_offset_rad)
+{
+    g_foc.theta_offset = wrap_2pi(theta_offset_rad);
+    g_foc.aligned      = 1;
+
+    /* Make sure PWM is at neutral and integrators are clean before the
+     * closed-loop ISR is enabled. */
+    FOC_OpenLoopUpdate(0.0f, 0.0f, 0.0f);
     PI_Reset(&g_foc.pi_d);
     PI_Reset(&g_foc.pi_q);
 }
@@ -339,8 +351,8 @@ void TIM1_UP_TIM16_IRQHandler(void)
 
                 /* PID: PI on position error, minus Kd * velocity. */
                 /* Shortest-path wrap disabled: use raw error. */
-                float err = g_foc.pos_ref_deg - g_foc.theta_mech_deg;
-                /* float err = wrap_180(g_foc.pos_ref_deg - g_foc.theta_mech_deg); */
+                //float err = g_foc.pos_ref_deg - g_foc.theta_mech_deg;
+                float err = wrap_180(g_foc.pos_ref_deg - g_foc.theta_mech_deg); 
                 float out = PI_Update(&g_foc.pi_pos, err, FOC_POS_DT)
                             - g_foc.pos_Kd * g_foc.vel_deg_s;
 
