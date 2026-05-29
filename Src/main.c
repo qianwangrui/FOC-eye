@@ -20,11 +20,13 @@
 #include "main.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "qwr_FOC_peri_init.h"
 #include "qwr_MT6701_driver.h"
 #include "qwr_INA240_driver.h"
 #include "qwr_uart_driver.h"
 #include "qwr_FOC.h"
+#include "wink.h"
 
 
 /** @addtogroup STM32G4xx_HAL_Examples
@@ -183,18 +185,16 @@ int main(void)
    * remount the rotor / encoder, re-run alignment and update this value. */
   static const float CAL_THETA_OFFSET = 0.09f;
   FOC_SetCalibratedOffset(CAL_THETA_OFFSET);
-  //FOC_AlignRotor();
+ // FOC_AlignRotor();
   /* Start current-loop ISR, then enable position-loop on top.
    * pos_Kp  : torque per degree of error  (A/deg)
    * pos_Ki  : integral gain               (A/(deg·s))
    * iq_max  : maximum torque command (A), = pi_pos.out_max */
   g_foc.id_ref = 0.0f;
-  g_foc.iq_ref = 0.8f;
+  g_foc.iq_ref = 1.0f;
   FOC_StartClosedLoopISR();
-  FOC_EnablePositionMode(0.025f, 0.000f, 0.0002f, 1.0f);
-  g_foc.pos_ref_deg = 10.0f;
-  /* Set initial target = current position (motor holds still). */
-  /* Change g_foc.pos_ref_deg at run-time to command a new angle. */
+  FOC_EnablePositionMode(0.080f, 0.01f, 0.0002f, 1.0f);
+  g_foc.pos_ref_deg = -15.0f;
 
   /* Start bare-metal RXNE interrupt -> ring buffer for UART commands. */
   UART3_StartCmdRx();
@@ -215,8 +215,7 @@ int main(void)
       if (c == '\r' || c == '\n') {
         if (cmd_idx > 0) {
           cmd_buf[cmd_idx] = '\0';
-          float delta = strtof(cmd_buf, NULL);
-          g_foc.pos_ref_deg += delta;
+          APP_RunCommand(cmd_buf);
         }
         cmd_idx = 0;
       } else if (cmd_idx < sizeof(cmd_buf) - 1) {

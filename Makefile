@@ -38,6 +38,7 @@ AS_DEFS =
 # ----- Includes ---------------------------------------------------------------
 C_INCLUDES = \
   -IInc \
+  -IAPP \
   -IDrivers/STM32G4xx_HAL_Driver/Inc \
   -IDrivers/STM32G4xx_HAL_Driver/Inc/Legacy \
   -IDrivers/CMSIS/Device/ST/STM32G4xx/Include \
@@ -49,6 +50,7 @@ AS_INCLUDES =
 # User application
 C_SOURCES = \
   $(wildcard Src/*.c) \
+  $(wildcard APP/*.c) \
   $(wildcard User/*.c)
 
 # HAL driver sources (skip *_template.c)
