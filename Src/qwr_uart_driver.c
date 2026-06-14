@@ -1,4 +1,5 @@
 #include "qwr_uart_driver.h"
+#include "debug_cpu.h"
 #include <stdio.h>
 
 UART_HandleTypeDef huart3;
@@ -124,6 +125,7 @@ void UART3_StartCmdRx(void)
 
 void USART3_IRQHandler(void)
 {
+    debug_cpu_busy();
     g_uart_isr_cnt++;
     uint32_t isr = USART3->ISR;
 
@@ -141,6 +143,7 @@ void USART3_IRQHandler(void)
             s_rx_head = next;
         }
     }
+    debug_cpu_idle();
 }
 
 /* Called from main loop: returns -1 if empty, else the byte. */

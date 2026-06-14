@@ -1,4 +1,5 @@
 #include "qwr_FOC.h"
+#include "debug_cpu.h"
 #include "qwr_FOC_peri_init.h"     /* extern htim1 */
 #include "qwr_MT6701_driver.h"     /* MT6701_GetAngleDeg */
 #include "qwr_INA240_driver.h"     /* INA240_ReadCurrent_* */
@@ -369,6 +370,8 @@ void TIM1_UP_TIM16_IRQHandler(void)
         __HAL_TIM_GET_IT_SOURCE(&htim1, TIM_IT_UPDATE)) {
         __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_UPDATE);
 
+        debug_cpu_busy();
+
         /* Encoder speed + optional position loop at 1 kHz. */
         if (++s_vel_tick >= FOC_VEL_DECIMATION) {
             s_vel_tick = 0;
@@ -397,5 +400,7 @@ void TIM1_UP_TIM16_IRQHandler(void)
         }
 
         FOC_ClosedLoopUpdate(g_foc.id_ref, g_foc.iq_ref, FOC_CONTROL_DT);
+
+        debug_cpu_idle();
     }
 }

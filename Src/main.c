@@ -28,6 +28,7 @@
 #include "qwr_FOC.h"
 #include "motor_config.h"
 #include "wink.h"
+#include "debug_cpu.h"
 
 
 /** @addtogroup STM32G4xx_HAL_Examples
@@ -64,6 +65,7 @@ int main(void){
        - Low Level Initialization
      */
   HAL_Init();
+  debug_cpu_init();
 
   /* Configure the System clock to have a frequency of 170 MHz */
   SystemClock_Config();
@@ -121,38 +123,40 @@ int main(void){
   while (1)
   {
     /* ---- Drain RX ring buffer (filled by USART3 ISR, never lost) ---- */
-    int b;
-    while ((b = UART3_GetByte()) >= 0) {
-      char c = (char)b;
-      if (c == '\r' || c == '\n') {
-        if (cmd_idx > 0) {
-          cmd_buf[cmd_idx] = '\0';
-          APP_RunCommand(cmd_buf);
-        }
-        cmd_idx = 0;
-      } else if (cmd_idx < sizeof(cmd_buf) - 1) {
-        cmd_buf[cmd_idx++] = c;
-      }
-    }
+    // int b;
+    // while ((b = UART3_GetByte()) >= 0) {
+    //   char c = (char)b;
+    //   if (c == '\r' || c == '\n') {
+    //     if (cmd_idx > 0) {
+    //       cmd_buf[cmd_idx] = '\0';
+    //       APP_RunCommand(cmd_buf);
+    //     }
+    //     cmd_idx = 0;
+    //   } else if (cmd_idx < sizeof(cmd_buf) - 1) {
+    //     cmd_buf[cmd_idx++] = c;
+    //   }
+    // }
 
-    /* ---- Telemetry at 5 Hz ---- */
-    uint32_t now = HAL_GetTick();
-    if ((int32_t)(now - next_plot) >= 0) {
-      next_plot = now + 200;          /* 200 ms = 5 Hz */
+    // /* ---- Telemetry at 5 Hz ---- */
+    // uint32_t now = HAL_GetTick();
+    // if ((int32_t)(now - next_plot) >= 0) {
+    //   next_plot = now + 200;          /* 200 ms = 5 Hz */
 
-      uint16_t raw = MT6701_ReadAngle_SSI();
-      float    deg = (float)raw / 16384.0f * 360.0f;
-      /* VOFA: raw14, deg, theta_offset, id_ref, id, iq_ref, iq, vel_rev_s */
-      printf("%u,%f,%f,%f,%f,%f,%f,%f\n",
-             (unsigned)raw,
-             (double)deg,
-             (double)g_foc.theta_offset,
-             (double)g_foc.id_ref,
-             (double)g_foc.id,
-             (double)g_foc.iq_ref,
-             (double)g_foc.iq,
-             (double)FOC_GetMechanicalVelocityRps());
-    }
+    //   debug_cpu_busy();
+    //   uint16_t raw = MT6701_ReadAngle_SSI();
+    //   float    deg = (float)raw / 16384.0f * 360.0f;
+    //   /* VOFA: raw14, deg, theta_offset, id_ref, id, iq_ref, iq, vel_rev_s */
+    //   printf("%u,%f,%f,%f,%f,%f,%f,%f\n",
+    //          (unsigned)raw,
+    //          (double)deg,
+    //          (double)g_foc.theta_offset,
+    //          (double)g_foc.id_ref,
+    //          (double)g_foc.id,
+    //          (double)g_foc.iq_ref,
+    //          (double)g_foc.iq,
+    //          (double)FOC_GetMechanicalVelocityRps());
+    //   debug_cpu_idle();
+    // }
   }
 }
 
