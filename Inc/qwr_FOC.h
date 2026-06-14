@@ -2,26 +2,18 @@
 #define _QWR_FOC_H_
 
 #include "stm32g4xx_hal.h"
+#include "motor_config.h"
 #include <stdint.h>
 
 /* PWM period from TIM1 init (ARR = 4250-1, so 4250 ticks per half cycle). */
 #define FOC_PWM_PERIOD   4250U
 
-/* Motor constants - adjust if you change motors. */
-#define FOC_POLE_PAIRS   7U      /* Verified: 10 s open-loop @ 5 rad/s = ~8 elec
-                                   * revs producing ~0.5 mech rev  =>  PP ~= 14
-                                   * (typical 28-magnet gimbal motor). */
-
-/* Encoder direction relative to electrical-angle direction.
- *  +1 : encoder counts the same way the stator field rotates
- *  -1 : encoder counts the OPPOSITE way (motor will lock and vibrate
- *       under closed-loop control unless this is flipped).
- * If your motor just sits and hums without rotating, flip this sign. */
-#define FOC_ENC_DIR      (+1)
+#define FOC_POLE_PAIRS   MOTOR_POLE_PAIRS
+#define FOC_ENC_DIR      MOTOR_ENC_DIR
 
 /* Voltage magnitude limit for the dq voltage vector (normalised, [0, 1]).
  * SPWM linear region is sqrt(Vd^2+Vq^2) <= 1. We leave some headroom. */
-#define FOC_V_MAX        0.80f
+#define FOC_V_MAX        0.95f
 
 /* Rotor alignment parameters (open-loop pre-pulse that locks rotor to a known
  * electrical angle, so we can capture the encoder zero offset). */
@@ -37,6 +29,10 @@
  * 20000 / 20 = 1000 Hz position loop. */
 #define FOC_POS_DECIMATION   20U
 #define FOC_POS_DT           (FOC_CONTROL_DT * FOC_POS_DECIMATION)
+
+/* Mechanical velocity estimate: encoder delta at 1 kHz (same decimation). */
+#define FOC_VEL_DECIMATION   FOC_POS_DECIMATION
+#define FOC_VEL_DT           FOC_POS_DT
 
 /* First-order IIR low-pass filter on the dq-axis voltage commands
  * (Vd, Vq), applied AFTER the PI controllers and BEFORE park_inv.
@@ -179,5 +175,18 @@ void FOC_StartClosedLoopISR(void);
  * position PI whose output becomes iq_ref.  Set g_foc.pos_ref_deg to
  * the desired mechanical angle in degrees. */
 void FOC_EnablePositionMode(float pos_Kp, float pos_Ki, float pos_Kd, float iq_max);
+
+/* Read MT6701, update g_foc.theta_mech_deg and g_foc.vel_deg_s (deg/s).
+ * Called from the TIM1 ISR every FOC_VEL_DECIMATION ticks (1 kHz). */
+void FOC_UpdateMechanicalVelocity(void);
+
+/* Latest filtered mechanical speed from encoder differentiation. */
+float FOC_GetMechanicalVelocityDegS(void);
+
+/* Convenience: rev/s (圈/秒) = deg/s / 360. */
+float FOC_GetMechanicalVelocityRps(void);
+
+/* Convenience: RPM = rev/s * 60. */
+float FOC_GetMechanicalVelocityRpm(void);
 
 #endif /* _QWR_FOC_H_ */

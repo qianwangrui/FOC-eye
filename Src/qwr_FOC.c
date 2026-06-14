@@ -12,6 +12,11 @@
 
 FOC_State_t g_foc = {0};
 
+/* 1 kHz low-pass on encoder-derived speed for telemetry / Kd damping. */
+#define FOC_VEL_LPF_ALPHA  0.25f
+static float s_vel_filt_deg_s = 0.0f;
+static uint16_t s_vel_tick = 0;
+
 /* Wrap angle difference to [-180, +180] degrees for shortest-path control. */
 static inline float wrap_180(float deg)
 {
@@ -161,14 +166,8 @@ void FOC_Init(void)
     g_foc.iq_ref       = 0.0f;
     g_foc.aligned      = 0;
 
-    /* Conservative starting gains for a small gimbal motor at 1 kHz.
-     * Tune these while watching the id/iq traces on VOFA+:
-     *   - Kp too small -> slow response
-     *   - Kp too large -> oscillation, beeping
-     *   - Ki too large -> overshoot
-     * Output is normalised voltage fraction ([-1,+1] = full bus/2 swing). */
-    PI_Init(&g_foc.pi_d, 1.0f, 5.0f, 0.5f);   /* d-axis */
-    PI_Init(&g_foc.pi_q, 2.0f, 0.0f, 0.9f);   /* q-axis */
+    PI_Init(&g_foc.pi_d, MOTOR_PI_D_KP, MOTOR_PI_D_KI, MOTOR_PI_D_OUT_MAX);
+    PI_Init(&g_foc.pi_q, MOTOR_PI_Q_KP, MOTOR_PI_Q_KI, MOTOR_PI_Q_OUT_MAX);
 }
 
 float FOC_UpdateElectricalAngle(void)
@@ -310,12 +309,45 @@ void FOC_ClosedLoopUpdate(float id_ref, float iq_ref, float dt)
 
 /* ====================  Timer interrupt control  ==================== */
 
+void FOC_UpdateMechanicalVelocity(void)
+{
+    float deg = MT6701_GetAngleDeg();
+    float d_angle = wrap_180(deg - g_foc.theta_mech_prev);
+
+    g_foc.theta_mech_deg  = deg;
+    g_foc.theta_mech_prev = deg;
+
+    float vel_raw = d_angle / FOC_VEL_DT;
+    s_vel_filt_deg_s += FOC_VEL_LPF_ALPHA * (vel_raw - s_vel_filt_deg_s);
+    g_foc.vel_deg_s = s_vel_filt_deg_s;
+}
+
+float FOC_GetMechanicalVelocityDegS(void)
+{
+    return g_foc.vel_deg_s;
+}
+
+float FOC_GetMechanicalVelocityRps(void)
+{
+    return g_foc.vel_deg_s / 360.0f;
+}
+
+float FOC_GetMechanicalVelocityRpm(void)
+{
+    return FOC_GetMechanicalVelocityRps() * 60.0f;
+}
+
 void FOC_StartClosedLoopISR(void)
 {
     PI_Reset(&g_foc.pi_d);
     PI_Reset(&g_foc.pi_q);
     PI_Reset(&g_foc.pi_pos);
     g_foc.pos_tick = 0;
+    s_vel_tick     = 0;
+    s_vel_filt_deg_s = 0.0f;
+    g_foc.theta_mech_deg  = MT6701_GetAngleDeg();
+    g_foc.theta_mech_prev = g_foc.theta_mech_deg;
+    g_foc.vel_deg_s       = 0.0f;
     __HAL_TIM_ENABLE_IT(&htim1, TIM_IT_UPDATE);
 }
 
@@ -337,17 +369,15 @@ void TIM1_UP_TIM16_IRQHandler(void)
         __HAL_TIM_GET_IT_SOURCE(&htim1, TIM_IT_UPDATE)) {
         __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_UPDATE);
 
-        /* Position loop at 1 kHz (every FOC_POS_DECIMATION ticks). */
+        /* Encoder speed + optional position loop at 1 kHz. */
+        if (++s_vel_tick >= FOC_VEL_DECIMATION) {
+            s_vel_tick = 0;
+            FOC_UpdateMechanicalVelocity();
+        }
+
         if (g_foc.pos_mode) {
             if (++g_foc.pos_tick >= FOC_POS_DECIMATION) {
                 g_foc.pos_tick = 0;
-                g_foc.theta_mech_deg = MT6701_GetAngleDeg();
-
-                /* Velocity estimate (deg/s) from angle delta. */
-                float d_angle = wrap_180(g_foc.theta_mech_deg
-                                         - g_foc.theta_mech_prev);
-                g_foc.theta_mech_prev = g_foc.theta_mech_deg;
-                g_foc.vel_deg_s = d_angle / FOC_POS_DT;
 
                 /* PID: PI on position error, minus Kd * velocity. */
                 /* Shortest-path wrap disabled: use raw error. */

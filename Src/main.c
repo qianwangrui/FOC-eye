@@ -26,6 +26,7 @@
 #include "qwr_INA240_driver.h"
 #include "qwr_uart_driver.h"
 #include "qwr_FOC.h"
+#include "motor_config.h"
 #include "wink.h"
 
 
@@ -51,8 +52,7 @@ static void SystemClock_Config(void);
   * @param  None
   * @retval None
   */
-int main(void)
-{
+int main(void){
 
   /* STM32G4xx HAL library initialization:
        - Configure the Flash prefetch, Flash preread and Buffer caches
@@ -92,108 +92,20 @@ int main(void)
    *
    * Compare to FOC_POLE_PAIRS to know if your setting is correct.
    * Set back to 0 when done. */
-  #define PP_CALIBRATION_MODE 0
-
-  if (PP_CALIBRATION_MODE) {
-      /* Park PWM at 50% duty so motor is freewheeling. */
-      FOC_OpenLoopUpdate(0.0f, 0.0f, 0.0f);
-
-      /* Use FOC_POLE_PAIRS just for the live theta_e plot; the wrap counter
-       * itself is independent of PP and uses raw mech_deg crossings. */
-      float    last_mech_deg     = MT6701_GetAngleDeg();
-      float    last_theta_pp1    = last_mech_deg * (3.14159265f / 180.0f);
-      uint32_t theta_e_wraps     = 0;       /* counted within current mech rev */
-      uint32_t mech_revs         = 0;
-      uint32_t loop_n            = 0;
-
-      printf("# PP CAL: rotate the rotor SLOWLY one full turn.\n");
-      printf("# Each completed mech revolution prints PP_measured.\n");
-
-      while (1) {
-          float mech_deg = MT6701_GetAngleDeg();
-
-          /* Detect mech_deg sawtooth wrap (e.g. 359 -> 1). The direction
-           * of rotation does not matter, we look at large jumps. */
-          float mech_jump = mech_deg - last_mech_deg;
-          if (mech_jump >  300.0f || mech_jump < -300.0f) {
-              /* One full mechanical revolution completed in some direction. */
-              mech_revs++;
-              printf("# rev %lu: theta_e wraps observed = %lu  =>  PP = %lu\n",
-                     (unsigned long)mech_revs,
-                     (unsigned long)theta_e_wraps,
-                     (unsigned long)theta_e_wraps);
-              theta_e_wraps = 0;
-          }
-          last_mech_deg = mech_deg;
-
-          /* Use REAL PP=1 for the wrap-counter so it counts encoder
-           * sawtooths directly (theta_pp1 wraps == mech_deg wraps).
-           * For the wrap counter that tells us PP, we instead count
-           * how many times theta_with_PP1 * (some test factor) wraps —
-           * but simpler: count theta_e wraps with PP_assumed = a known
-           * factor. We use 1 here because then theta_e_wraps per mech rev
-           * equals 1 (sanity); to actually MEASURE PP we count electrical
-           * cycles directly via the unwrapped mech angle. See below. */
-
-          /* Independent measurement: track mech_deg in radians without
-           * wrapping (cumulative), and count how many times mech_rad
-           * crosses an integer multiple of 2*pi/PP_TEST. We pick PP_TEST=1
-           * (so it counts mech_revs, useless) — better approach:
-           * count theta_e (with PP=1) wraps per mech rev, which is 1.
-           *
-           * Cleaner: just print mech_deg AND a counter that increments
-           * every time mech_deg passes a fixed set of probe angles. Skip
-           * all that complexity — instead just print:
-           *   - mech_deg (so user can see one full rev was completed)
-           *   - mech_rad * PP_assumed mod 2*pi  (wraps PP times per rev)
-           * and auto-count wraps of channel 1.   */
-          float theta_pp1 = mech_deg * (3.14159265f / 180.0f);
-          /* Compute theta_e using the CURRENT FOC_POLE_PAIRS just for a
-           * live wrap counter against the assumed PP. */
-          float theta_e_assumed = theta_pp1 * (float)FOC_POLE_PAIRS;
-          while (theta_e_assumed >= 6.283185f) theta_e_assumed -= 6.283185f;
-          while (theta_e_assumed < 0.0f)       theta_e_assumed += 6.283185f;
-
-          /* Detect theta_e wrap: was high, now low (or vice versa) - a
-           * jump > pi in either direction is a wrap. */
-          float te_jump = theta_e_assumed - last_theta_pp1;
-          if (te_jump >  3.14159f || te_jump < -3.14159f) {
-              theta_e_wraps++;
-          }
-          last_theta_pp1 = theta_e_assumed;
-
-          /* Heartbeat once per second so you know the firmware is alive
-           * and can see current angle. Wrap-event prints come in addition. */
-          if (++loop_n >= 50) {
-              loop_n = 0;
-              printf("# mech=%6.1f deg   theta_e_norm=%.3f   wraps_so_far=%lu\n",
-                     (double)mech_deg,
-                     (double)(theta_e_assumed / 6.283185f),
-                     (unsigned long)theta_e_wraps);
-          }
-          HAL_Delay(20);
-      }
-      /* Never reach here. */
-  }
+  
   //顺时针编码器读数变小，逆时针变大
   /* ---------- Closed-loop FOC bring-up sequence ---------- */
   FOC_Init();           /* gains, state defaults */
 
-  /* Pre-calibrated electrical offset, measured once with FOC_AlignRotor()
-   * and stored in Flash via this const (lives in .rodata). Skip the live
-   * alignment so boot is instant and the motor does not jerk. If you ever
-   * remount the rotor / encoder, re-run alignment and update this value. */
-  static const float CAL_THETA_OFFSET = 0.09f;
-  FOC_SetCalibratedOffset(CAL_THETA_OFFSET);
- // FOC_AlignRotor();
-  /* Start current-loop ISR, then enable position-loop on top.
-   * pos_Kp  : torque per degree of error  (A/deg)
-   * pos_Ki  : integral gain               (A/(deg·s))
-   * iq_max  : maximum torque command (A), = pi_pos.out_max */
+#if MOTOR_SKIP_ALIGN
+  FOC_SetCalibratedOffset(MOTOR_CAL_OFFSET);
+#else
+  FOC_AlignRotor();
+#endif
   g_foc.id_ref = 0.0f;
-  g_foc.iq_ref = 1.0f;
+  g_foc.iq_ref = 0.5f;
   FOC_StartClosedLoopISR();
-  FOC_EnablePositionMode(0.080f, 0.01f, 0.0002f, 1.0f);
+  FOC_EnablePositionMode(MOTOR_POS_KP, MOTOR_POS_KI, MOTOR_POS_KD, MOTOR_IQ_MAX);
   g_foc.pos_ref_deg = -15.0f;
 
   /* Start bare-metal RXNE interrupt -> ring buffer for UART commands. */
@@ -230,15 +142,16 @@ int main(void)
 
       uint16_t raw = MT6701_ReadAngle_SSI();
       float    deg = (float)raw / 16384.0f * 360.0f;
-      /* VOFA channels: raw14, deg, theta_offset, id_ref, id, iq_ref, iq */
-      printf("%u,%f,%f,%f,%f,%f,%f\n",
+      /* VOFA: raw14, deg, theta_offset, id_ref, id, iq_ref, iq, vel_rev_s */
+      printf("%u,%f,%f,%f,%f,%f,%f,%f\n",
              (unsigned)raw,
              (double)deg,
              (double)g_foc.theta_offset,
              (double)g_foc.id_ref,
              (double)g_foc.id,
              (double)g_foc.iq_ref,
-             (double)g_foc.iq);
+             (double)g_foc.iq,
+             (double)FOC_GetMechanicalVelocityRps());
     }
   }
 }
