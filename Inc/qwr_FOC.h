@@ -12,7 +12,8 @@
 #define FOC_ENC_DIR      MOTOR_ENC_DIR
 
 /* Voltage magnitude limit for the dq voltage vector (normalised, [0, 1]).
- * SPWM linear region is sqrt(Vd^2+Vq^2) <= 1. We leave some headroom. */
+ * SVPWM linear region: sqrt(Vd^2+Vq^2) <= ~1.0 (inscribed circle in hexagon).
+ * We leave some headroom below 1.0. */
 #define FOC_V_MAX        0.95f
 
 /* Rotor alignment parameters (open-loop pre-pulse that locks rotor to a known
@@ -158,7 +159,7 @@ void FOC_SetCalibratedOffset(float theta_offset_rad);
  *   3. Clarke + Park -> id, iq
  *   4. PI(id, id_ref) -> Vd,  PI(iq, iq_ref) -> Vq
  *   5. Saturate Vdq to FOC_V_MAX circle
- *   6. Inverse Park + Clarke + SPWM -> TIM1 CCR
+ *   6. Inverse Park + SVPWM -> TIM1 CCR
  * dt: elapsed seconds since last call (for integral). */
 void FOC_ClosedLoopUpdate(float id_ref, float iq_ref, float dt);
 

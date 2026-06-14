@@ -62,12 +62,24 @@ void park_fwd(float ialpha, float ibeta, float theta, float *id, float *iq)
     *iq = -ialpha * s + ibeta * c;
 }
 
-/* ====================  PWM helpers  ==================== */
+/* ====================  PWM / SVPWM helpers  ==================== */
 
-/* Clamp a normalised voltage (expected in [-1, +1]) to [0, PERIOD] duty. */
+/* SVPWM zero-sequence injection (min-max / centred PWM).
+ * Same line-to-line result as sector SVPWM; keeps Valpha/Vbeta unchanged. */
+static inline void svpwm_center(float *Vu, float *Vv, float *Vw)
+{
+    float vmax = (*Vu > *Vv) ? (*Vu > *Vw ? *Vu : *Vw) : (*Vv > *Vw ? *Vv : *Vw);
+    float vmin = (*Vu < *Vv) ? (*Vu < *Vw ? *Vu : *Vw) : (*Vv < *Vw ? *Vv : *Vw);
+    float vcom = 0.5f * (vmax + vmin);
+    *Vu -= vcom;
+    *Vv -= vcom;
+    *Vw -= vcom;
+}
+
+/* Normalised phase voltage [-1, +1] -> duty -> CCR. */
 static inline uint32_t volt_to_ccr(float v)
 {
-    /* SPWM centred modulation: duty = (v + 1) / 2  */
+    /* SVPWM centred duty: (v + 1) / 2  */
     float duty = 0.5f * (v + 1.0f);
     if (duty < 0.0f) duty = 0.0f;
     if (duty > 1.0f) duty = 1.0f;
@@ -92,6 +104,8 @@ static void foc_write_output(float theta_elec, float Vd, float Vq,
                              float Valpha, float Vbeta,
                              float Vu, float Vv, float Vw)
 {
+    svpwm_center(&Vu, &Vv, &Vw);
+
     TIM1->CCR1 = volt_to_ccr(Vu);
     TIM1->CCR2 = volt_to_ccr(Vv);
     TIM1->CCR3 = volt_to_ccr(Vw);
@@ -277,7 +291,7 @@ void FOC_ClosedLoopUpdate(float id_ref, float iq_ref, float dt)
     float Vd = PI_Update(&g_foc.pi_d, id_ref - id, dt);
     float Vq = PI_Update(&g_foc.pi_q, iq_ref - iq, dt);
 
-    /* 5. Saturate |(Vd, Vq)| <= FOC_V_MAX to stay in the linear SPWM region. */
+    /* 5. Saturate |(Vd, Vq)| <= FOC_V_MAX (SVPWM linear region). */
     float mag2 = Vd * Vd + Vq * Vq;
     float lim2 = FOC_V_MAX * FOC_V_MAX;
     if (mag2 > lim2) {
@@ -300,7 +314,7 @@ void FOC_ClosedLoopUpdate(float id_ref, float iq_ref, float dt)
         Vq = s_Vq_f;
     }
 
-    /* 6. Inverse Park + Clarke -> PWM. */
+    /* 6. Inverse Park + inverse Clarke + SVPWM -> PWM. */
     float Valpha, Vbeta, Vu, Vv, Vw;
     park_inv(Vd, Vq, theta, &Valpha, &Vbeta);
     clarke_inv(Valpha, Vbeta, &Vu, &Vv, &Vw);
