@@ -25,6 +25,7 @@
 #include "qwr_MT6701_driver.h"
 #include "qwr_INA240_driver.h"
 #include "qwr_uart_driver.h"
+#include "qwr_fdcan_driver.h"
 #include "qwr_FOC.h"
 #include "motor_config.h"
 #include "wink.h"
@@ -76,6 +77,9 @@ int main(void){
   INA240_ADC_Init();
   UART3_Init();        /* RX: command channel from host        */
   UART1_Init();        /* TX: VOFA+ telemetry (printf goes here) */
+  FDCAN_Init();        /* Classic CAN, internal loopback test  */
+  FDCAN_Start();
+  printf("can_lb,ok,0,0\n");
 
   /* No boot banner: VOFA+ FireWater would try to parse it as data. */
 
@@ -117,25 +121,39 @@ int main(void){
   uint8_t cmd_idx = 0;
 
   uint32_t next_plot = HAL_GetTick();
+  uint32_t next_can  = HAL_GetTick();
 
   /* Infinite loop — telemetry + command RX at 5 Hz (200 ms period).
    * Control loop runs independently in the TIM1 update ISR. */
   while (1)
   {
     /* ---- Drain RX ring buffer (filled by USART3 ISR, never lost) ---- */
-    // int b;
-    // while ((b = UART3_GetByte()) >= 0) {
-    //   char c = (char)b;
-    //   if (c == '\r' || c == '\n') {
-    //     if (cmd_idx > 0) {
-    //       cmd_buf[cmd_idx] = '\0';
-    //       APP_RunCommand(cmd_buf);
-    //     }
-    //     cmd_idx = 0;
-    //   } else if (cmd_idx < sizeof(cmd_buf) - 1) {
-    //     cmd_buf[cmd_idx++] = c;
-    //   }
-    // }
+    int b;
+    while ((b = UART3_GetByte()) >= 0) {
+      char c = (char)b;
+      if (c == '\r' || c == '\n') {
+        if (cmd_idx > 0) {
+          cmd_buf[cmd_idx] = '\0';
+          APP_RunCommand(cmd_buf);
+        }
+        cmd_idx = 0;
+      } else if (cmd_idx < sizeof(cmd_buf) - 1) {
+        cmd_buf[cmd_idx++] = c;
+      }
+    }
+
+    /* ---- FDCAN internal loopback test @ 2 Hz ---- */
+    {
+      uint32_t now = HAL_GetTick();
+      if ((int32_t)(now - next_can) >= 0) {
+        next_can = now + 500U;
+        FDCAN_LoopbackPoll();
+        printf("can_lb,tx=%lu,ok=%lu,fail=%lu\n",
+               (unsigned long)g_fdcan_lb.tx_cnt,
+               (unsigned long)g_fdcan_lb.rx_ok_cnt,
+               (unsigned long)g_fdcan_lb.rx_fail_cnt);
+      }
+    }
 
     // /* ---- Telemetry at 5 Hz ---- */
     // uint32_t now = HAL_GetTick();
