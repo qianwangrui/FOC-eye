@@ -5,7 +5,7 @@
 UART_HandleTypeDef huart3;
 UART_HandleTypeDef huart1;
 
-/* ---- Bare-metal RX ring buffer (filled by USART3 RXNE ISR) -------- */
+/* ---- Shared command RX ring (USART3 PB11 + USART1 PB7) -------- */
 #define UART_RX_BUF_SIZE  64          /* must be power of 2 */
 static volatile uint8_t s_rx_buf[UART_RX_BUF_SIZE];
 static volatile uint8_t s_rx_head;    /* written by ISR  */
@@ -13,6 +13,44 @@ static volatile uint8_t s_rx_tail;    /* read by main    */
 volatile uint32_t g_uart_rx_cnt;      /* debug: total bytes received */
 volatile uint32_t g_uart_isr_cnt;     /* debug: total ISR entries */
 volatile uint32_t g_uart_cr1_dbg;     /* debug: CR1 snapshot after init */
+
+static void uart_cmd_rx_push(uint8_t byte)
+{
+    uint8_t next = (s_rx_head + 1) & (UART_RX_BUF_SIZE - 1);
+    if (next != s_rx_tail) {
+        s_rx_buf[s_rx_head] = byte;
+        s_rx_head = next;
+    }
+}
+
+static void uart_cmd_rx_start(USART_TypeDef *usart, IRQn_Type irqn)
+{
+    usart->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF
+               | USART_ICR_PECF  | USART_ICR_IDLECF;
+    (void)usart->RDR;
+
+    usart->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
+    HAL_NVIC_SetPriority(irqn, 3, 0);
+    HAL_NVIC_EnableIRQ(irqn);
+}
+
+static void uart_cmd_rx_isr(USART_TypeDef *usart)
+{
+    debug_cpu_busy();
+    g_uart_isr_cnt++;
+    uint32_t isr = usart->ISR;
+
+    if (isr & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE)) {
+        usart->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
+    }
+
+    if (isr & USART_ISR_RXNE_RXFNE) {
+        uint8_t byte = (uint8_t)(usart->RDR & 0xFF);
+        g_uart_rx_cnt++;
+        uart_cmd_rx_push(byte);
+    }
+    debug_cpu_idle();
+}
 
 /* HAL callback: configure GPIO + clock for USART1 / USART3 when
  * HAL_UART_Init() runs. */
@@ -100,57 +138,43 @@ int __io_getchar(void)
     return ch;
 }
 
-/* -------------------------------------------------------------------------
- * Bare-metal RXNE interrupt: just stuffs bytes into the ring buffer.
- * No HAL state machine, no callbacks, no lock — cannot get stuck.
- * ------------------------------------------------------------------------- */
-void UART3_StartCmdRx(void)
+void UART_StartCmdRx(void)
 {
     s_rx_head = 0;
     s_rx_tail = 0;
 
-    /* Clear any pending RX / error flags before enabling interrupts. */
-    USART3->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF
-               | USART_ICR_PECF  | USART_ICR_IDLECF;
-    (void)USART3->RDR;   /* dummy read to clear RXNE if set */
+    uart_cmd_rx_start(USART3, USART3_IRQn);
+    uart_cmd_rx_start(USART1, USART1_IRQn);
 
-    /* Enable only RXNE interrupt (no EIE — we handle ORE inside ISR). */
-    USART3->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
+    g_uart_cr1_dbg = USART3->CR1;
+}
 
-    HAL_NVIC_SetPriority(USART3_IRQn, 3, 0);
-    HAL_NVIC_EnableIRQ(USART3_IRQn);
-
-    g_uart_cr1_dbg = USART3->CR1;   /* snapshot for debugging */
+void UART3_StartCmdRx(void)
+{
+    UART_StartCmdRx();
 }
 
 void USART3_IRQHandler(void)
 {
-    debug_cpu_busy();
-    g_uart_isr_cnt++;
-    uint32_t isr = USART3->ISR;
-
-    /* Clear any error flags (overrun / framing / noise). */
-    if (isr & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE))
-        USART3->ICR = USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
-
-    /* Read every available byte into the ring buffer. */
-    if (isr & USART_ISR_RXNE_RXFNE) {
-        uint8_t byte = (uint8_t)(USART3->RDR & 0xFF);
-        g_uart_rx_cnt++;
-        uint8_t next = (s_rx_head + 1) & (UART_RX_BUF_SIZE - 1);
-        if (next != s_rx_tail) {          /* buffer not full */
-            s_rx_buf[s_rx_head] = byte;
-            s_rx_head = next;
-        }
-    }
-    debug_cpu_idle();
+    uart_cmd_rx_isr(USART3);
 }
 
-/* Called from main loop: returns -1 if empty, else the byte. */
+void USART1_IRQHandler(void)
+{
+    uart_cmd_rx_isr(USART1);
+}
+
 int UART3_GetByte(void)
 {
-    if (s_rx_tail == s_rx_head) return -1;
+    if (s_rx_tail == s_rx_head) {
+        return -1;
+    }
     uint8_t byte = s_rx_buf[s_rx_tail];
     s_rx_tail = (s_rx_tail + 1) & (UART_RX_BUF_SIZE - 1);
     return byte;
+}
+
+int UART1_GetByte(void)
+{
+    return UART3_GetByte();
 }

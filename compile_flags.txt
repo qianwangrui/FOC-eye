@@ -1,0 +1,9 @@
+-IInc
+-IAPP
+-IDrivers/STM32G4xx_HAL_Driver/Inc
+-IDrivers/STM32G4xx_HAL_Driver/Inc/Legacy
+-IDrivers/CMSIS/Device/ST/STM32G4xx/Include
+-IDrivers/CMSIS/Include
+-DSTM32G431xx
+-DUSE_HAL_DRIVER
+-std=c11

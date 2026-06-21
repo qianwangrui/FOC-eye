@@ -26,6 +26,8 @@
 #include "qwr_INA240_driver.h"
 #include "qwr_uart_driver.h"
 #include "qwr_fdcan_driver.h"
+#include "qwr_can_node.h"
+#include "can_node_config.h"
 #include "qwr_FOC.h"
 #include "motor_config.h"
 #include "wink.h"
@@ -77,9 +79,16 @@ int main(void){
   INA240_ADC_Init();
   UART3_Init();        /* RX: command channel from host        */
   UART1_Init();        /* TX: VOFA+ telemetry (printf goes here) */
-  FDCAN_Init();        /* Classic CAN, internal loopback test  */
+  FDCAN_Init();        /* Classic CAN 500 kbps on PA11/12 */
   FDCAN_Start();
-  printf("can_lb,ok,0,0\n");
+  CAN_NodeInit();
+#if CAN_NODE_IS_GATEWAY
+  printf("can_node,role=gateway,id=%u,uart=pb11|pb7,batch=0xC6\n",
+         (unsigned)CAN_NODE_ID);
+#else
+  printf("can_node,role=slave,id=%u,can_id=0x300\n",
+         (unsigned)CAN_NODE_ID);
+#endif
 
   /* No boot banner: VOFA+ FireWater would try to parse it as data. */
 
@@ -109,28 +118,34 @@ int main(void){
   FOC_AlignRotor();
 #endif
   g_foc.id_ref = 0.0f;
-  g_foc.iq_ref = 0.5f;
+  g_foc.iq_ref = 1.0f;
   FOC_StartClosedLoopISR();
   FOC_EnablePositionMode(MOTOR_POS_KP, MOTOR_POS_KI, MOTOR_POS_KD, MOTOR_IQ_MAX);
   g_foc.pos_ref_deg = -15.0f;
 
-  /* Start bare-metal RXNE interrupt -> ring buffer for UART commands. */
-  UART3_StartCmdRx();
+  /* Start bare-metal RXNE interrupt -> ring buffer for UART commands (PB11 + PB7). */
+  UART_StartCmdRx();
 
   char    cmd_buf[32];
   uint8_t cmd_idx = 0;
 
-  uint32_t next_plot = HAL_GetTick();
   uint32_t next_can  = HAL_GetTick();
 
   /* Infinite loop — telemetry + command RX at 5 Hz (200 ms period).
    * Control loop runs independently in the TIM1 update ISR. */
   while (1)
   {
-    /* ---- Drain RX ring buffer (filled by USART3 ISR, never lost) ---- */
+    /* ---- Drain RX ring buffer (PB11 USART3 + PB7 USART1) ---- */
     int b;
     while ((b = UART3_GetByte()) >= 0) {
       char c = (char)b;
+      uint8_t consumed = 0U;
+#if CAN_NODE_IS_GATEWAY
+      consumed = CAN_GatewayFeedUartByte((uint8_t)b);
+#endif
+      if (consumed) {
+        continue;
+      }
       if (c == '\r' || c == '\n') {
         if (cmd_idx > 0) {
           cmd_buf[cmd_idx] = '\0';
@@ -142,16 +157,28 @@ int main(void){
       }
     }
 
-    /* ---- FDCAN internal loopback test @ 2 Hz ---- */
+    /* ---- CAN RX/TX (every loop); stats print @ 2 Hz ---- */
+    CAN_NodePoll();
     {
       uint32_t now = HAL_GetTick();
       if ((int32_t)(now - next_can) >= 0) {
         next_can = now + 500U;
-        FDCAN_LoopbackPoll();
-        printf("can_lb,tx=%lu,ok=%lu,fail=%lu\n",
-               (unsigned long)g_fdcan_lb.tx_cnt,
-               (unsigned long)g_fdcan_lb.rx_ok_cnt,
-               (unsigned long)g_fdcan_lb.rx_fail_cnt);
+#if CAN_NODE_IS_GATEWAY
+        printf("can_node,tx=%lu,rx=%lu,fail=%lu,batch=%lu,angle=%lu,seq=%u,pos=%.2f\n",
+               (unsigned long)g_can_node.tx_cnt,
+               (unsigned long)g_can_node.rx_cnt,
+               (unsigned long)g_can_node.tx_fail,
+               (unsigned long)g_can_node.batch_cnt,
+               (unsigned long)g_can_node.angle_rx_cnt,
+               (unsigned)g_can_node.last_seq,
+               (double)g_foc.pos_ref_deg);
+#else
+        printf("can_node,rx=%lu,angle=%lu,seq=%u,pos=%.2f\n",
+               (unsigned long)g_can_node.rx_cnt,
+               (unsigned long)g_can_node.angle_rx_cnt,
+               (unsigned)g_can_node.last_seq,
+               (double)g_foc.pos_ref_deg);
+#endif
       }
     }
 

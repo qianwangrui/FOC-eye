@@ -77,8 +77,13 @@ void FDCAN_Init(void)
     hfdcan1.Instance = FDCAN1;
     hfdcan1.Init.ClockDivider       = FDCAN_CLOCK_DIV2;
     hfdcan1.Init.FrameFormat        = FDCAN_FRAME_CLASSIC;
+#if FDCAN_USE_INTERNAL_LOOPBACK
     hfdcan1.Init.Mode               = FDCAN_MODE_INTERNAL_LOOPBACK;
     hfdcan1.Init.AutoRetransmission = DISABLE;
+#else
+    hfdcan1.Init.Mode               = FDCAN_MODE_NORMAL;
+    hfdcan1.Init.AutoRetransmission = ENABLE;
+#endif
     hfdcan1.Init.TransmitPause      = DISABLE;
     hfdcan1.Init.ProtocolException  = DISABLE;
     /* PLLQ=170 MHz, /2 => 85 MHz kernel; 85M / (10*17) = 500 kbps classic CAN. */
@@ -153,6 +158,27 @@ uint8_t FDCAN_SendStd(uint16_t std_id, const uint8_t *data, uint8_t len)
     return (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &hdr, payload) == HAL_OK) ? 1U : 0U;
 }
 
+uint8_t FDCAN_SendStdWait(uint16_t std_id, const uint8_t *data, uint8_t len, uint32_t timeout_ms)
+{
+    uint32_t free_before = HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1);
+
+    if (!FDCAN_SendStd(std_id, data, len)) {
+        return 0U;
+    }
+
+    if (timeout_ms == 0U) {
+        return 1U;
+    }
+
+    uint32_t t0 = HAL_GetTick();
+    while (HAL_FDCAN_GetTxFifoFreeLevel(&hfdcan1) < free_before) {
+        if ((HAL_GetTick() - t0) >= timeout_ms) {
+            return 0U;
+        }
+    }
+    return 1U;
+}
+
 uint8_t FDCAN_TryRecvStd(uint32_t *std_id, uint8_t *data, uint8_t *len)
 {
     FDCAN_RxHeaderTypeDef hdr = {0};
@@ -212,4 +238,31 @@ void FDCAN_LoopbackPoll(void)
     }
 
     g_fdcan_lb.rx_fail_cnt++;
+}
+
+void FDCAN_BusPoll(void)
+{
+    static uint8_t seq = 0U;
+    uint8_t tx[8] = {0xA5U, 0x5AU, 0U, 1U, 2U, 3U, 4U, 5U};
+    uint8_t rx[8] = {0};
+    uint32_t rx_id = 0U;
+    uint8_t rx_len = 0U;
+
+    tx[2] = seq++;
+
+    if (FDCAN_SendStd(FDCAN_LB_TEST_ID, tx, sizeof(tx))) {
+        g_fdcan_lb.tx_cnt++;
+    } else {
+        g_fdcan_lb.rx_fail_cnt++;
+    }
+
+    while (FDCAN_TryRecvStd(&rx_id, rx, &rx_len)) {
+        g_fdcan_lb.rx_ok_cnt++;
+        g_fdcan_lb.last_rx_id  = rx_id;
+        g_fdcan_lb.last_rx_len = rx_len;
+        if (rx_len > sizeof(g_fdcan_lb.last_rx_data)) {
+            rx_len = sizeof(g_fdcan_lb.last_rx_data);
+        }
+        memcpy(g_fdcan_lb.last_rx_data, rx, rx_len);
+    }
 }

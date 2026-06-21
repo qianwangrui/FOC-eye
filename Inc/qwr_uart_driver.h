@@ -3,20 +3,20 @@
 
 #include "stm32g4xx_hal.h"
 
-/* USART3 on PB10 (TX) / PB11 (RX), 115200 8N1.
- * Used as the command-RX channel from VOFA / terminal. */
+/* USART3 on PB10 (TX) / PB11 (RX), 115200 8N1. */
 void UART3_Init(void);
 
 /* USART1 on PB6 (TX) / PB7 (RX), 115200 8N1.
- * TX-only path used to stream VOFA+ telemetry (printf is redirected here). */
+ * PB6: printf / VOFA+ telemetry out.
+ * PB7: command RX (same as PB11). */
 void UART1_Init(void);
 
-/* Start interrupt-driven RX. Each received line (terminated by '\n' or '\r')
- * is parsed as a floating-point number and ADDED to g_foc.pos_ref_deg.
- * E.g. sending "10\n" advances the target angle by 10 degrees;
- *      sending "-90\n" rewinds by 90 degrees.
- * Call AFTER UART3_Init() and AFTER FOC is up. */
-void UART3_StartCmdRx(void);
+/* Enable interrupt RX on PB11 (USART3) and PB7 (USART1), shared ring buffer.
+ * Text commands (set/blink/pos) and gateway binary batch (0xC6) work on either pin.
+ * Call AFTER UART init and AFTER FOC is up. */
+void UART_StartCmdRx(void);
+void UART3_StartCmdRx(void);   /* alias of UART_StartCmdRx() */
 int  UART3_GetByte(void);
+int  UART1_GetByte(void);      /* alias of UART3_GetByte() */
 
 #endif /* _QWR_UART_DRIVER_H_ */
