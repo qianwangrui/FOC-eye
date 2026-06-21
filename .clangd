@@ -5,6 +5,14 @@ CompileFlags:
   CompilationDatabase: .
   Add:
     - --target=arm-none-eabi
+    - -IInc
+    - -IAPP
+    - -IDrivers/STM32G4xx_HAL_Driver/Inc
+    - -IDrivers/STM32G4xx_HAL_Driver/Inc/Legacy
+    - -IDrivers/CMSIS/Device/ST/STM32G4xx/Include
+    - -IDrivers/CMSIS/Include
+    - -DSTM32G431xx
+    - -DUSE_HAL_DRIVER
     # newlib (libc) headers shipped with arm-none-eabi-gcc on Debian/Ubuntu.
     - -isystem/usr/include/newlib
     # arm-none-eabi-gcc built-in headers (stddef.h, stdint.h, ...).

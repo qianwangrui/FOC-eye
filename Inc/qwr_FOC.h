@@ -171,6 +171,8 @@ void FOC_OpenLoopUpdate(float theta_elec, float Vd, float Vq);
 /* Start running closed-loop control from TIM1 update interrupt.
  * Call after FOC_Init + FOC_AlignRotor.  Set g_foc.id_ref / iq_ref first. */
 void FOC_StartClosedLoopISR(void);
+void FOC_StopClosedLoopISR(void);
+uint8_t FOC_IsRunning(void);
 
 /* Enable position-loop mode.  After this call the ISR will run a 1 kHz
  * position PI whose output becomes iq_ref.  Set g_foc.pos_ref_deg to

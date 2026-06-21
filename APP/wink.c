@@ -9,6 +9,8 @@
 #include "qwr_FOC.h"
 #include "qwr_can_node.h"
 #include "can_node_config.h"
+#include "nvm_cal.h"
+#include "motor_config.h"
 
 static int8_t clamp_angle_i8(float deg)
 {
@@ -22,6 +24,47 @@ static int8_t clamp_angle_i8(float deg)
     return (int8_t)(deg + 0.5f);
   }
   return (int8_t)(deg - 0.5f);
+}
+
+void APP_FOC_StartMotor(void)
+{
+  if (FOC_IsRunning()) {
+    return;
+  }
+  g_foc.id_ref = 0.0f;
+  g_foc.iq_ref = 1.0f;
+  FOC_StartClosedLoopISR();
+  FOC_EnablePositionMode(MOTOR_POS_KP, MOTOR_POS_KI, MOTOR_POS_KD, MOTOR_IQ_MAX);
+  g_foc.pos_ref_deg = -15.0f;
+}
+
+static void cal_cmd_align(void)
+{
+  if (FOC_IsRunning()) {
+    FOC_StopClosedLoopISR();
+  }
+  FOC_AlignRotor();
+  printf("# cal align ok theta=%.6f rad\r\n", (double)g_foc.theta_offset);
+  APP_FOC_StartMotor();
+}
+
+static void cal_cmd_save(void)
+{
+  if (!g_foc.aligned) {
+    printf("# cal: run 'cal align' first\r\n");
+    return;
+  }
+  int rc = NVM_Cal_Save(g_foc.theta_offset);
+  if (rc == 0) {
+    printf("# cal save ok\r\n");
+  } else {
+    printf("# cal save fail rc=%d\r\n", rc);
+  }
+}
+
+static void cal_cmd_show(void)
+{
+  NVM_Cal_Show(g_foc.theta_offset);
 }
 
 void APP_LowerEyelidBlink(void)
@@ -81,6 +124,20 @@ void APP_RunCommand(const char *cmd)
 #else
     printf("# all: gateway only\n");
 #endif
+    return;
+  }
+
+  if (strncmp(cmd, "cal ", 4) == 0) {
+    const char *sub = cmd + 4;
+    if (strcmp(sub, "align") == 0) {
+      cal_cmd_align();
+    } else if (strcmp(sub, "save") == 0) {
+      cal_cmd_save();
+    } else if (strcmp(sub, "show") == 0) {
+      cal_cmd_show();
+    } else {
+      printf("# cal: use align | save | show\r\n");
+    }
     return;
   }
 

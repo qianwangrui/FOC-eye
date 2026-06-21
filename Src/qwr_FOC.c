@@ -366,6 +366,17 @@ void FOC_StartClosedLoopISR(void)
     __HAL_TIM_ENABLE_IT(&htim1, TIM_IT_UPDATE);
 }
 
+void FOC_StopClosedLoopISR(void)
+{
+    __HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
+    FOC_OpenLoopUpdate(0.0f, 0.0f, 0.0f);
+}
+
+uint8_t FOC_IsRunning(void)
+{
+    return (__HAL_TIM_GET_IT_SOURCE(&htim1, TIM_IT_UPDATE) == SET) ? 1U : 0U;
+}
+
 void FOC_EnablePositionMode(float pos_Kp, float pos_Ki, float pos_Kd, float iq_max)
 {
     PI_Init(&g_foc.pi_pos, pos_Kp, pos_Ki, iq_max);

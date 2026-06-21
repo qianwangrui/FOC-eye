@@ -3,9 +3,11 @@
 # Usage:
 #   make                # build .elf .hex .bin
 #   make clean
-#   make flash          # flash with st-flash (stlink-tools)
-#   make flash-cube     # flash with STM32_Programmer_CLI (CubeProgrammer)
-#   make flash-ocd      # flash with OpenOCD + ST-Link
+#   make flash          # st-flash: FULL chip erase — also wipes NVM cal page
+#   make flash-keep-cal # STM32CubeProgrammer: erase app pages only, keep page 63
+#   make flash-cube     # CubeProgrammer full download (erases per tool settings)
+#   make flash-ocd      # OpenOCD program
+#   make flash-dap      # OpenOCD + CMSIS-DAP
 # ------------------------------------------------------------------------------
 
 TARGET      ?= FOC_eye
@@ -110,7 +112,13 @@ clean:
 	-rm -fR $(BUILD_DIR)
 
 flash: $(BUILD_DIR)/$(TARGET).bin
+	@echo "NOTE: st-flash mass-erases chip — NVM cal at 0x0801F800 is lost."
+	@echo "      Use 'make flash-keep-cal' to preserve calibration page."
 	st-flash --reset write $< 0x08000000
+
+# Erase flash pages 0..62 only, program firmware below NVM page 63 (0x0801F800).
+flash-keep-cal: $(BUILD_DIR)/$(TARGET).bin
+	STM32_Programmer_CLI -c port=SWD -e 0 62 -w $< 0x08000000 -v -rst
 
 flash-cube: $(BUILD_DIR)/$(TARGET).elf
 	STM32_Programmer_CLI -c port=SWD -w $< -rst
@@ -131,4 +139,4 @@ serial:
 
 -include $(wildcard $(BUILD_DIR)/*.d)
 
-.PHONY: all clean flash flash-cube flash-ocd flash-dap serial
+.PHONY: all clean flash flash-keep-cal flash-cube flash-ocd flash-dap serial

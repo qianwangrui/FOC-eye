@@ -24,7 +24,8 @@
 #define MOTOR_IQ_MAX         1.0f
 
 #define MOTOR_CAL_OFFSET     0.09f   /* rad，仅 MOTOR_SKIP_ALIGN=1 时用 */
-#define MOTOR_SKIP_ALIGN     0       /* 1 = 跳过 AlignRotor，用上面 offset */
+#define MOTOR_SKIP_ALIGN     0       /* 1 = 跳过 AlignRotor，用 MOTOR_CAL_OFFSET */
+#define MOTOR_ALIGN_ON_BOOT  0       /* 1 = 无 Flash 校准时仍上电强拖 */
 
 #elif MOTOR_PROFILE == 1
 /* ---------- 新电机：6 极对数（初值同旧电机，上板后按 VOFA+ 调） ---------- */
@@ -44,7 +45,8 @@
 #define MOTOR_IQ_MAX         20.0f
 
 #define MOTOR_CAL_OFFSET     0.0f
-#define MOTOR_SKIP_ALIGN     0       /* 换电机必须重新 AlignRotor */
+#define MOTOR_SKIP_ALIGN     0       /* 1 = 跳过 AlignRotor，用 MOTOR_CAL_OFFSET */
+#define MOTOR_ALIGN_ON_BOOT  1     /* 1 = 无 Flash 校准时仍上电强拖；装机构后保持 0 */
 
 #else
 #error "MOTOR_PROFILE must be 0 or 1"

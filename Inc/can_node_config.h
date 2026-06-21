@@ -16,10 +16,10 @@
  *   [seq, 0x01, ang0..ang5]  — CAN ID 0x300，6 x int8 度
  * ============================================================================= */
 
-#define CAN_MOTOR_COUNT       6U
+#define CAN_MOTOR_COUNT       1U
 
 /* 本板电机编号：0 = 网关板（第 1 个垫片），1..5 = 从站 */
-#define CAN_NODE_ID           3U
+#define CAN_NODE_ID           0U
 
 /* 1 = 网关（接收 USART3 外部命令并 CAN 转发）；0 = 从站 */
 #define CAN_NODE_IS_GATEWAY   1U

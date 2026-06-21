@@ -32,6 +32,7 @@
 #include "motor_config.h"
 #include "wink.h"
 #include "debug_cpu.h"
+#include "nvm_cal.h"
 
 
 /** @addtogroup STM32G4xx_HAL_Examples
@@ -112,16 +113,30 @@ int main(void){
   /* ---------- Closed-loop FOC bring-up sequence ---------- */
   FOC_Init();           /* gains, state defaults */
 
-#if MOTOR_SKIP_ALIGN
-  FOC_SetCalibratedOffset(MOTOR_CAL_OFFSET);
-#else
-  FOC_AlignRotor();
-#endif
-  g_foc.id_ref = 0.0f;
-  g_foc.iq_ref = 1.0f;
-  FOC_StartClosedLoopISR();
-  FOC_EnablePositionMode(MOTOR_POS_KP, MOTOR_POS_KI, MOTOR_POS_KD, MOTOR_IQ_MAX);
-  g_foc.pos_ref_deg = -15.0f;
+  {
+    float theta_offset = 0.0f;
+    uint8_t motor_ready = 0U;
+
+    if (NVM_Cal_TryLoad(&theta_offset)) {
+      FOC_SetCalibratedOffset(theta_offset);
+      motor_ready = 1U;
+      printf("# cal: loaded flash theta=%.6f rad\r\n", (double)theta_offset);
+    } else if (MOTOR_SKIP_ALIGN) {
+      FOC_SetCalibratedOffset(MOTOR_CAL_OFFSET);
+      motor_ready = 1U;
+      printf("# cal: skip align, use MOTOR_CAL_OFFSET\r\n");
+    } else if (MOTOR_ALIGN_ON_BOOT) {
+      FOC_AlignRotor();
+      motor_ready = 1U;
+      printf("# cal: MOTOR_ALIGN_ON_BOOT\r\n");
+    } else {
+      printf("# cal: no flash cal — send 'cal align' (bare motor) then 'cal save'\r\n");
+    }
+
+    if (motor_ready) {
+      APP_FOC_StartMotor();
+    }
+  }
 
   /* Start bare-metal RXNE interrupt -> ring buffer for UART commands (PB11 + PB7). */
   UART_StartCmdRx();

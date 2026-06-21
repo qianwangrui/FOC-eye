@@ -77,6 +77,7 @@ def print_help() -> None:
         "  blink                     run firmware blink (local motor only)\n"
         "  set DEG                   set local motor angle\n"
         "  pos DEG                   add to local motor angle\n"
+        "  cal align|save|show       rotor offset cal in flash\n"
         "  quit / exit\n"
         f"Motors are indexed 0..{MOTOR_COUNT - 1}. Angles are int8 degrees (-128..127)."
     )
@@ -135,6 +136,11 @@ def handle_command(ser: serial.Serial, seq: int, line: str) -> int:
         return (seq + 1) & 0xFF
 
     if cmd in ("blink", "blink1", "set", "pos") or cmd.startswith("set") or cmd.startswith("pos"):
+        send_text_line(ser, line)
+        safe_print(f"[tx] text: {line}")
+        return seq
+
+    if cmd.startswith("cal "):
         send_text_line(ser, line)
         safe_print(f"[tx] text: {line}")
         return seq
