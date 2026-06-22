@@ -94,10 +94,11 @@ typedef struct {
     float theta_mech_deg;    /* current mechanical angle (degrees, 0..360) */
     float theta_mech_prev;   /* previous sample, for velocity estimate */
     float vel_deg_s;         /* estimated velocity (deg/s) */
-    float pos_ref_deg;       /* target mechanical angle (degrees) */
+    float pos_ref_deg;       /* target angle in command space (signed deg, int8 protocol) */
     float pos_Kd;            /* velocity damping gain (A·s/deg) */
     uint8_t pos_mode;        /* 1 = position loop active, 0 = pure torque */
     uint16_t pos_tick;       /* decimation counter */
+    uint8_t torque_armed;    /* 1 = apply torque (after angle command) */
 
     /* Whether FOC_AlignRotor has been called. If 0, closed-loop update
      * will refuse to run (theta_offset not set). */
@@ -178,6 +179,35 @@ uint8_t FOC_IsRunning(void);
  * position PI whose output becomes iq_ref.  Set g_foc.pos_ref_deg to
  * the desired mechanical angle in degrees. */
 void FOC_EnablePositionMode(float pos_Kp, float pos_Ki, float pos_Kd, float iq_max);
+
+/* Configure position loop but leave motor idle (no PWM torque). */
+void FOC_InitPositionMode(float pos_Kp, float pos_Ki, float pos_Kd, float iq_max);
+
+/* Set target angle and run closed-loop until deadband, then auto-idle. */
+void FOC_RequestAngle(float pos_ref_deg);
+
+/* Force idle: zero PWM and stop control ISR. */
+void FOC_DisarmTorque(void);
+
+uint8_t FOC_IsTorqueArmed(void);
+
+/* Call from main loop: disarm if no angle command for MOTOR_TORQUE_CMD_TIMEOUT_MS. */
+void FOC_PollTorqueCmdTimeout(void);
+
+/* MT6701 raw 0..360 → signed mechanical angle -180..+180. */
+float FOC_EncoderSignedDeg(float enc_0_360);
+
+/* Convert raw encoder degrees (0..360) to signed mechanical angle. */
+float FOC_EncoderToCmdDeg(float enc_deg);
+
+/* Wrap command/target angle to -180..+180. */
+float FOC_NormalizeTargetEnc(float target_deg);
+
+/* pos_ref target vs encoder, shortest path on circle. */
+float FOC_GetPosErrDeg(void);
+
+/* Refresh g_foc.theta_mech_deg from MT6701 when control ISR is idle. */
+void FOC_PollEncoderWhenIdle(void);
 
 /* Read MT6701, update g_foc.theta_mech_deg and g_foc.vel_deg_s (deg/s).
  * Called from the TIM1 ISR every FOC_VEL_DECIMATION ticks (1 kHz). */

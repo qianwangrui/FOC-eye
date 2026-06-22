@@ -4,7 +4,8 @@
 #   make                # build .elf .hex .bin
 #   make clean
 #   make flash          # st-flash: FULL chip erase — also wipes NVM cal page
-#   make flash-keep-cal # STM32CubeProgrammer: erase app pages only, keep page 63
+#   make flash-keep-cal     # STM32CubeProgrammer: erase pages 0-62, keep cal page 63
+#   make flash-dap-keep-cal # same, via CMSIS-DAP / SWD
 #   make flash-cube     # CubeProgrammer full download (erases per tool settings)
 #   make flash-ocd      # OpenOCD program
 #   make flash-dap      # OpenOCD + CMSIS-DAP
@@ -126,10 +127,17 @@ flash-cube: $(BUILD_DIR)/$(TARGET).elf
 OPENOCD = /opt/openocd-0.12/bin/openocd
 
 flash-ocd: $(BUILD_DIR)/$(TARGET).elf
+	@echo "NOTE: OpenOCD may erase sectors overlapping the image; cal page 63 is usually kept."
+	@echo "      If cal is lost, use 'make flash-keep-cal' instead."
 	$(OPENOCD) -f interface/stlink.cfg -f target/stm32g4x.cfg -c "program $< verify reset exit"
 
 flash-dap: $(BUILD_DIR)/$(TARGET).elf
+	@echo "NOTE: OpenOCD may erase sectors overlapping the image; cal page 63 is usually kept."
+	@echo "      Prefer 'make flash-dap-keep-cal' after first cal save."
 	$(OPENOCD) -f interface/cmsis-dap.cfg -f target/stm32g4x.cfg -c "program $< verify reset exit"
+
+flash-dap-keep-cal: $(BUILD_DIR)/$(TARGET).bin
+	STM32_Programmer_CLI -c port=SWD -e 0 62 -w $< 0x08000000 -v -rst
 
 # Open serial terminal (DAPLink VCP). Exit: Ctrl-T then Q
 SERIAL_PORT ?= /dev/ttyACM0
@@ -139,4 +147,4 @@ serial:
 
 -include $(wildcard $(BUILD_DIR)/*.d)
 
-.PHONY: all clean flash flash-keep-cal flash-cube flash-ocd flash-dap serial
+.PHONY: all clean flash flash-keep-cal flash-dap-keep-cal flash-cube flash-ocd flash-dap serial

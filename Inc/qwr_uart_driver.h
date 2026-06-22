@@ -19,4 +19,7 @@ void UART3_StartCmdRx(void);   /* alias of UART_StartCmdRx() */
 int  UART3_GetByte(void);
 int  UART1_GetByte(void);      /* alias of UART3_GetByte() */
 
+extern volatile uint32_t g_uart3_rx_cnt;
+extern volatile uint32_t g_uart1_rx_cnt;
+
 #endif /* _QWR_UART_DRIVER_H_ */

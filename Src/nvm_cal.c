@@ -77,6 +77,36 @@ static void fill_record(nvm_cal_record_t *rec, float theta_offset_rad)
     rec->crc32             = record_crc(rec);
 }
 
+void NVM_Cal_PrintLoadFail(void)
+{
+    const nvm_cal_record_t *rec = nvm_flash_ptr();
+
+    if (rec->magic == 0xFFFFFFFFU || rec->magic == 0U) {
+        printf("# cal: flash page empty — use 'make flash-dap-keep-cal' or 'cal align'+'cal save'\r\n");
+        return;
+    }
+    if (rec->magic != NVM_CAL_MAGIC || rec->version != NVM_CAL_VERSION) {
+        printf("# cal: bad magic/version (0x%08lX v%u)\r\n",
+               (unsigned long)rec->magic, (unsigned)rec->version);
+        return;
+    }
+    if (record_crc(rec) != rec->crc32) {
+        printf("# cal: CRC mismatch\r\n");
+        return;
+    }
+    if (rec->pole_pairs != (uint32_t)MOTOR_POLE_PAIRS) {
+        printf("# cal: pole_pairs mismatch flash=%lu fw=%u (check CAN_NODE_ID / MOTOR_PROFILE)\r\n",
+               (unsigned long)rec->pole_pairs, (unsigned)MOTOR_POLE_PAIRS);
+        return;
+    }
+    if (rec->enc_dir != (int32_t)MOTOR_ENC_DIR) {
+        printf("# cal: enc_dir mismatch flash=%ld fw=%d\r\n",
+               (long)rec->enc_dir, (int)MOTOR_ENC_DIR);
+        return;
+    }
+    printf("# cal: unknown load failure\r\n");
+}
+
 int NVM_Cal_TryLoad(float *theta_offset_rad)
 {
     const nvm_cal_record_t *rec = nvm_flash_ptr();

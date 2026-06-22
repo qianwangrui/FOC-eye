@@ -83,12 +83,9 @@ int main(void){
   FDCAN_Init();        /* Classic CAN 500 kbps on PA11/12 */
   FDCAN_Start();
   CAN_NodeInit();
-#if CAN_NODE_IS_GATEWAY
-  printf("can_node,role=gateway,id=%u,uart=pb11|pb7,batch=0xC6\n",
-         (unsigned)CAN_NODE_ID);
-#else
-  printf("can_node,role=slave,id=%u,can_id=0x300\n",
-         (unsigned)CAN_NODE_ID);
+#if !VOFA_TELEM_ENABLE
+  printf("can_node,id=%u,pp=%u,cmd=pb11+pb7,tx=pb6\n",
+         (unsigned)CAN_NODE_ID, (unsigned)MOTOR_POLE_PAIRS);
 #endif
 
   /* No boot banner: VOFA+ FireWater would try to parse it as data. */
@@ -130,21 +127,28 @@ int main(void){
       motor_ready = 1U;
       printf("# cal: MOTOR_ALIGN_ON_BOOT\r\n");
     } else {
-      printf("# cal: no flash cal — send 'cal align' (bare motor) then 'cal save'\r\n");
+      NVM_Cal_PrintLoadFail();
+      printf("# cal: send 'cal align' (bare motor) then 'cal save'\r\n");
     }
 
     if (motor_ready) {
       APP_FOC_StartMotor();
     }
+    printf("# boot: aligned=%u (flash cal %s)\r\n",
+           (unsigned)g_foc.aligned,
+           motor_ready ? "ok" : "missing");
   }
 
   /* Start bare-metal RXNE interrupt -> ring buffer for UART commands (PB11 + PB7). */
   UART_StartCmdRx();
 
-  char    cmd_buf[32];
+  char    cmd_buf[80];
   uint8_t cmd_idx = 0;
 
   uint32_t next_can  = HAL_GetTick();
+#if VOFA_TELEM_ENABLE
+  uint32_t next_vofa = HAL_GetTick();
+#endif
 
   /* Infinite loop — telemetry + command RX at 5 Hz (200 ms period).
    * Control loop runs independently in the TIM1 update ISR. */
@@ -154,10 +158,7 @@ int main(void){
     int b;
     while ((b = UART3_GetByte()) >= 0) {
       char c = (char)b;
-      uint8_t consumed = 0U;
-#if CAN_NODE_IS_GATEWAY
-      consumed = CAN_GatewayFeedUartByte((uint8_t)b);
-#endif
+      uint8_t consumed = CAN_FeedUartByte((uint8_t)b);
       if (consumed) {
         continue;
       }
@@ -174,49 +175,50 @@ int main(void){
 
     /* ---- CAN RX/TX (every loop); stats print @ 2 Hz ---- */
     CAN_NodePoll();
+    FOC_PollTorqueCmdTimeout();
+    FOC_PollEncoderWhenIdle();
+
+#if VOFA_TELEM_ENABLE
+    {
+      uint32_t now = HAL_GetTick();
+      if ((int32_t)(now - next_vofa) >= 0) {
+        next_vofa = now + VOFA_TELEM_MS;
+        float enc = MT6701_GetAngleDeg();
+        g_foc.theta_mech_deg = enc;
+        if (!FOC_IsRunning()) {
+          g_foc.theta_mech_prev = enc;
+        }
+        /* VOFA+ FireWater: enc_deg, target_deg, err_deg, iq_A */
+        printf("%.3f,%.3f,%.3f,%.3f\n",
+               (double)enc,
+               (double)FOC_NormalizeTargetEnc(g_foc.pos_ref_deg),
+               (double)FOC_GetPosErrDeg(),
+               (double)g_foc.iq);
+      }
+    }
+#else
     {
       uint32_t now = HAL_GetTick();
       if ((int32_t)(now - next_can) >= 0) {
         next_can = now + 500U;
-#if CAN_NODE_IS_GATEWAY
-        printf("can_node,tx=%lu,rx=%lu,fail=%lu,batch=%lu,angle=%lu,seq=%u,pos=%.2f\n",
+        printf("can_node,id=%u,tx=%lu,rx=%lu,fail=%lu,batch=%lu,angle=%lu,seq=%u,"
+               "pos=%.1f,enc=%.1f,err=%.1f,armed=%u,uart3=%lu,uart1=%lu\n",
+               (unsigned)CAN_NODE_ID,
                (unsigned long)g_can_node.tx_cnt,
                (unsigned long)g_can_node.rx_cnt,
                (unsigned long)g_can_node.tx_fail,
                (unsigned long)g_can_node.batch_cnt,
                (unsigned long)g_can_node.angle_rx_cnt,
                (unsigned)g_can_node.last_seq,
-               (double)g_foc.pos_ref_deg);
-#else
-        printf("can_node,rx=%lu,angle=%lu,seq=%u,pos=%.2f\n",
-               (unsigned long)g_can_node.rx_cnt,
-               (unsigned long)g_can_node.angle_rx_cnt,
-               (unsigned)g_can_node.last_seq,
-               (double)g_foc.pos_ref_deg);
-#endif
+               (double)FOC_NormalizeTargetEnc(g_foc.pos_ref_deg),
+               (double)g_foc.theta_mech_deg,
+               (double)FOC_GetPosErrDeg(),
+               (unsigned)FOC_IsTorqueArmed(),
+               (unsigned long)g_uart3_rx_cnt,
+               (unsigned long)g_uart1_rx_cnt);
       }
     }
-
-    // /* ---- Telemetry at 5 Hz ---- */
-    // uint32_t now = HAL_GetTick();
-    // if ((int32_t)(now - next_plot) >= 0) {
-    //   next_plot = now + 200;          /* 200 ms = 5 Hz */
-
-    //   debug_cpu_busy();
-    //   uint16_t raw = MT6701_ReadAngle_SSI();
-    //   float    deg = (float)raw / 16384.0f * 360.0f;
-    //   /* VOFA: raw14, deg, theta_offset, id_ref, id, iq_ref, iq, vel_rev_s */
-    //   printf("%u,%f,%f,%f,%f,%f,%f,%f\n",
-    //          (unsigned)raw,
-    //          (double)deg,
-    //          (double)g_foc.theta_offset,
-    //          (double)g_foc.id_ref,
-    //          (double)g_foc.id,
-    //          (double)g_foc.iq_ref,
-    //          (double)g_foc.iq,
-    //          (double)FOC_GetMechanicalVelocityRps());
-    //   debug_cpu_idle();
-    // }
+#endif
   }
 }
 

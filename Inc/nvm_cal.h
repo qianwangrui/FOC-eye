@@ -10,5 +10,7 @@
 int  NVM_Cal_TryLoad(float *theta_offset_rad);
 int  NVM_Cal_Save(float theta_offset_rad);
 void NVM_Cal_Show(float runtime_theta_rad);
+/* Print why TryLoad failed (magic/CRC/pp/dir mismatch vs erased page). */
+void NVM_Cal_PrintLoadFail(void);
 
 #endif /* NVM_CAL_H */

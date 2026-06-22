@@ -17,6 +17,7 @@ FOC_State_t g_foc = {0};
 #define FOC_VEL_LPF_ALPHA  0.25f
 static float s_vel_filt_deg_s = 0.0f;
 static uint16_t s_vel_tick = 0;
+static uint32_t s_torque_cmd_ms = 0U;
 
 /* Wrap angle difference to [-180, +180] degrees for shortest-path control. */
 static inline float wrap_180(float deg)
@@ -24,6 +25,44 @@ static inline float wrap_180(float deg)
     while (deg >  180.0f) deg -= 360.0f;
     while (deg < -180.0f) deg += 360.0f;
     return deg;
+}
+
+float FOC_EncoderToCmdDeg(float enc_deg)
+{
+    return FOC_EncoderSignedDeg(enc_deg);
+}
+
+float FOC_EncoderSignedDeg(float enc_0_360)
+{
+    float s = enc_0_360;
+
+    if (s > 180.0f) {
+        s -= 360.0f;
+    }
+    return s;
+}
+
+float FOC_NormalizeTargetEnc(float target_deg)
+{
+    return wrap_180(target_deg);
+}
+
+float FOC_GetPosErrDeg(void)
+{
+    return wrap_180(g_foc.pos_ref_deg - FOC_EncoderSignedDeg(g_foc.theta_mech_deg));
+}
+
+/* When closed-loop ISR is off, keep encoder telemetry fresh for printf / hand moves. */
+void FOC_PollEncoderWhenIdle(void)
+{
+    if (FOC_IsRunning()) {
+        return;
+    }
+    float deg = MT6701_GetAngleDeg();
+
+    g_foc.theta_mech_deg  = deg;
+    g_foc.theta_mech_prev = deg;
+    g_foc.vel_deg_s       = 0.0f;
 }
 
 /* ====================  Inverse transforms (existing)  ==================== */
@@ -369,12 +408,80 @@ void FOC_StartClosedLoopISR(void)
 void FOC_StopClosedLoopISR(void)
 {
     __HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
+    g_foc.torque_armed = 0U;
     FOC_OpenLoopUpdate(0.0f, 0.0f, 0.0f);
 }
 
 uint8_t FOC_IsRunning(void)
 {
     return (__HAL_TIM_GET_IT_SOURCE(&htim1, TIM_IT_UPDATE) == SET) ? 1U : 0U;
+}
+
+static void foc_enter_idle(void)
+{
+    g_foc.torque_armed = 0U;
+    g_foc.id_ref       = 0.0f;
+    g_foc.iq_ref       = 0.0f;
+    PI_Reset(&g_foc.pi_pos);
+    PI_Reset(&g_foc.pi_d);
+    PI_Reset(&g_foc.pi_q);
+    FOC_OpenLoopUpdate(0.0f, 0.0f, 0.0f);
+    __HAL_TIM_DISABLE_IT(&htim1, TIM_IT_UPDATE);
+}
+
+void FOC_InitPositionMode(float pos_Kp, float pos_Ki, float pos_Kd, float iq_max)
+{
+    if (FOC_IsRunning()) {
+        FOC_StopClosedLoopISR();
+    }
+    FOC_EnablePositionMode(pos_Kp, pos_Ki, pos_Kd, iq_max);
+    g_foc.torque_armed = 0U;
+    g_foc.pos_ref_deg  = FOC_EncoderSignedDeg(g_foc.theta_mech_deg);
+    FOC_OpenLoopUpdate(0.0f, 0.0f, 0.0f);
+}
+
+void FOC_RequestAngle(float pos_ref_deg)
+{
+    if (!g_foc.aligned) {
+        return;
+    }
+    if (!g_foc.pos_mode) {
+        FOC_EnablePositionMode(MOTOR_POS_KP, MOTOR_POS_KI, MOTOR_POS_KD, MOTOR_IQ_MAX);
+    }
+
+    g_foc.pos_ref_deg  = wrap_180(pos_ref_deg);
+    s_torque_cmd_ms    = HAL_GetTick();
+    g_foc.torque_armed = 1U;
+    PI_Reset(&g_foc.pi_pos);
+
+    if (!FOC_IsRunning()) {
+        float deg = MT6701_GetAngleDeg();
+        g_foc.theta_mech_deg  = deg;
+        g_foc.theta_mech_prev = deg;
+        g_foc.vel_deg_s       = 0.0f;
+        FOC_StartClosedLoopISR();
+    }
+}
+
+void FOC_DisarmTorque(void)
+{
+    foc_enter_idle();
+}
+
+uint8_t FOC_IsTorqueArmed(void)
+{
+    return g_foc.torque_armed;
+}
+
+void FOC_PollTorqueCmdTimeout(void)
+{
+    if (!g_foc.torque_armed) {
+        return;
+    }
+    uint32_t now = HAL_GetTick();
+    if ((uint32_t)(now - s_torque_cmd_ms) >= (uint32_t)MOTOR_TORQUE_CMD_TIMEOUT_MS) {
+        foc_enter_idle();
+    }
 }
 
 void FOC_EnablePositionMode(float pos_Kp, float pos_Ki, float pos_Kd, float iq_max)
@@ -384,7 +491,7 @@ void FOC_EnablePositionMode(float pos_Kp, float pos_Ki, float pos_Kd, float iq_m
     g_foc.theta_mech_prev = g_foc.theta_mech_deg;
     g_foc.vel_deg_s       = 0.0f;
     g_foc.pos_Kd          = pos_Kd;
-    g_foc.pos_ref_deg     = g_foc.theta_mech_deg;  /* hold current position */
+    g_foc.pos_ref_deg     = FOC_EncoderSignedDeg(g_foc.theta_mech_deg);
     g_foc.pos_tick        = 0;
     g_foc.pos_mode        = 1;
 }
@@ -403,28 +510,38 @@ void TIM1_UP_TIM16_IRQHandler(void)
             FOC_UpdateMechanicalVelocity();
         }
 
-        if (g_foc.pos_mode) {
+        if (!g_foc.torque_armed) {
+            FOC_OpenLoopUpdate(0.0f, 0.0f, 0.0f);
+        } else if (g_foc.pos_mode) {
             if (++g_foc.pos_tick >= FOC_POS_DECIMATION) {
                 g_foc.pos_tick = 0;
 
-                /* PID: PI on position error, minus Kd * velocity. */
-                /* Shortest-path wrap disabled: use raw error. */
-                //float err = g_foc.pos_ref_deg - g_foc.theta_mech_deg;
-                float err = wrap_180(g_foc.pos_ref_deg - g_foc.theta_mech_deg); 
-                float out = PI_Update(&g_foc.pi_pos, err, FOC_POS_DT)
-                            - g_foc.pos_Kd * g_foc.vel_deg_s;
+                float err = FOC_GetPosErrDeg();
 
-                /* Clamp total output to iq_max. */
-                float lim = g_foc.pi_pos.out_max;
-                if (out >  lim) out =  lim;
-                if (out < -lim) out = -lim;
+#if 0  /* position deadband disabled */
+                if (fabsf(err) <= MOTOR_POS_DEADBAND_DEG
+                    && fabsf(g_foc.vel_deg_s) <= MOTOR_POS_DEADBAND_VEL_DEGS) {
+                    foc_enter_idle();
+                } else
+#endif
+                {
+                    float out = PI_Update(&g_foc.pi_pos, err, FOC_POS_DT)
+                                - g_foc.pos_Kd * g_foc.vel_deg_s;
 
-                g_foc.iq_ref = out;
-                g_foc.id_ref = 0.0f;
+                    float lim = g_foc.pi_pos.out_max;
+                    if (out >  lim) out =  lim;
+                    if (out < -lim) out = -lim;
+
+                    g_foc.iq_ref = out;
+                    g_foc.id_ref = 0.0f;
+                    FOC_ClosedLoopUpdate(g_foc.id_ref, g_foc.iq_ref, FOC_CONTROL_DT);
+                }
+            } else {
+                FOC_ClosedLoopUpdate(g_foc.id_ref, g_foc.iq_ref, FOC_CONTROL_DT);
             }
+        } else {
+            FOC_ClosedLoopUpdate(g_foc.id_ref, g_foc.iq_ref, FOC_CONTROL_DT);
         }
-
-        FOC_ClosedLoopUpdate(g_foc.id_ref, g_foc.iq_ref, FOC_CONTROL_DT);
 
         debug_cpu_idle();
     }

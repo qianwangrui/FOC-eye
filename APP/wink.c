@@ -26,16 +26,30 @@ static int8_t clamp_angle_i8(float deg)
   return (int8_t)(deg - 0.5f);
 }
 
-void APP_FOC_StartMotor(void)
+static const char *cmd_skip_ws(const char *s)
 {
-  if (FOC_IsRunning()) {
+  while (s != NULL && (*s == ' ' || *s == '\t')) {
+    s++;
+  }
+  return s;
+}
+
+static void request_angle_or_warn(float deg)
+{
+  if (!g_foc.aligned) {
+    printf("# error: not calibrated — run 'cal align' then 'cal save'\r\n");
     return;
   }
-  g_foc.id_ref = 0.0f;
-  g_foc.iq_ref = 1.0f;
-  FOC_StartClosedLoopISR();
-  FOC_EnablePositionMode(MOTOR_POS_KP, MOTOR_POS_KI, MOTOR_POS_KD, MOTOR_IQ_MAX);
-  g_foc.pos_ref_deg = -15.0f;
+  g_foc.pos_ref_deg = deg;
+  FOC_RequestAngle(deg);
+}
+
+void APP_FOC_StartMotor(void)
+{
+  if (!g_foc.aligned) {
+    return;
+  }
+  FOC_InitPositionMode(MOTOR_POS_KP, MOTOR_POS_KI, MOTOR_POS_KD, MOTOR_IQ_MAX);
 }
 
 static void cal_cmd_align(void)
@@ -76,9 +90,11 @@ void APP_LowerEyelidBlink(void)
   // HAL_Delay(30000);
 
   g_foc.pos_ref_deg = end_deg;
+  request_angle_or_warn(end_deg);
   HAL_Delay(35);
 
   g_foc.pos_ref_deg = start_deg;
+  request_angle_or_warn(start_deg);
   HAL_Delay(350);
 }
 
@@ -88,47 +104,56 @@ void APP_RunCommand(const char *cmd)
     return;
   }
 
+  cmd = cmd_skip_ws(cmd);
+  if (*cmd == '\0') {
+    return;
+  }
+
   if ((strcmp(cmd, "blink") == 0) || (strcmp(cmd, "blink1") == 0)) {
     APP_LowerEyelidBlink();
     printf("# blink done\n");
     return;
   }
 
-  if (strncmp(cmd, "pos ", 4) == 0) {
-    g_foc.pos_ref_deg += strtof(cmd + 4, NULL);
+  if (strncmp(cmd, "pos", 3) == 0 &&
+      (cmd[3] == '\0' || cmd[3] == ' ' || cmd[3] == '\t')) {
+    const char *arg = cmd_skip_ws(cmd + 3);
+    float deg = g_foc.pos_ref_deg + strtof(arg, NULL);
+    request_angle_or_warn(deg);
     return;
   }
 
-  if (strncmp(cmd, "all ", 4) == 0) {
-#if CAN_NODE_IS_GATEWAY
-    const char *p = cmd + 4;
+  if (strncmp(cmd, "all", 3) == 0 &&
+      (cmd[3] == '\0' || cmd[3] == ' ' || cmd[3] == '\t')) {
+    const char *p = cmd_skip_ws(cmd + 3);
     int8_t angles[CAN_MOTOR_COUNT];
     char *end = NULL;
 
     for (uint8_t i = 0U; i < CAN_MOTOR_COUNT; i++) {
-      while (*p == ' ') {
-        p++;
+      p = cmd_skip_ws(p);
+      if (*p == '\0') {
+        printf("# all: need %u angles, e.g. all -30 -50 -30 -50 -50 -50\r\n",
+               (unsigned)CAN_MOTOR_COUNT);
+        return;
       }
       float deg = strtof(p, &end);
       if (end == p) {
-        printf("# all: need %u angles\n", (unsigned)CAN_MOTOR_COUNT);
+        printf("# all: bad angle near '%s'\r\n", p);
         return;
       }
       angles[i] = clamp_angle_i8(deg);
       p = end;
     }
     static uint8_t seq = 0U;
-    CAN_GatewayForwardAngles(angles, seq);
-    printf("# all ok seq=%u\n", (unsigned)seq);
+    CAN_ForwardAngles(angles, seq);
+    printf("# all ok seq=%u\r\n", (unsigned)seq);
     seq++;
-#else
-    printf("# all: gateway only\n");
-#endif
     return;
   }
 
-  if (strncmp(cmd, "cal ", 4) == 0) {
-    const char *sub = cmd + 4;
+  if (strncmp(cmd, "cal", 3) == 0 &&
+      (cmd[3] == '\0' || cmd[3] == ' ' || cmd[3] == '\t')) {
+    const char *sub = cmd_skip_ws(cmd + 3);
     if (strcmp(sub, "align") == 0) {
       cal_cmd_align();
     } else if (strcmp(sub, "save") == 0) {
@@ -141,10 +166,24 @@ void APP_RunCommand(const char *cmd)
     return;
   }
 
-  if (strncmp(cmd, "set ", 4) == 0) {
-    g_foc.pos_ref_deg = strtof(cmd + 4, NULL);
+  if (strncmp(cmd, "set", 3) == 0 &&
+      (cmd[3] == '\0' || cmd[3] == ' ' || cmd[3] == '\t')) {
+    const char *arg = cmd_skip_ws(cmd + 3);
+    float deg = strtof(arg, NULL);
+    request_angle_or_warn(deg);
     return;
   }
 
-  printf("# unknown cmd: %s\n", cmd);
+  if (strcmp(cmd, "enc") == 0) {
+    float enc = MT6701_GetAngleDeg();
+    printf("# enc_raw=%.2f enc=%.2f target=%.2f err=%.2f vel=%.1f\r\n",
+           (double)enc,
+           (double)FOC_EncoderSignedDeg(enc),
+           (double)g_foc.pos_ref_deg,
+           (double)FOC_GetPosErrDeg(),
+           (double)g_foc.vel_deg_s);
+    return;
+  }
+
+  printf("# unknown cmd: %s\r\n", cmd);
 }

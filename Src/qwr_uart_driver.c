@@ -11,6 +11,8 @@ static volatile uint8_t s_rx_buf[UART_RX_BUF_SIZE];
 static volatile uint8_t s_rx_head;    /* written by ISR  */
 static volatile uint8_t s_rx_tail;    /* read by main    */
 volatile uint32_t g_uart_rx_cnt;      /* debug: total bytes received */
+volatile uint32_t g_uart3_rx_cnt;     /* bytes from USART3 PB11 */
+volatile uint32_t g_uart1_rx_cnt;     /* bytes from USART1 PB7 */
 volatile uint32_t g_uart_isr_cnt;     /* debug: total ISR entries */
 volatile uint32_t g_uart_cr1_dbg;     /* debug: CR1 snapshot after init */
 
@@ -38,6 +40,11 @@ static void uart_cmd_rx_isr(USART_TypeDef *usart)
 {
     debug_cpu_busy();
     g_uart_isr_cnt++;
+    if (usart == USART3) {
+        g_uart3_rx_cnt++;
+    } else if (usart == USART1) {
+        g_uart1_rx_cnt++;
+    }
     uint32_t isr = usart->ISR;
 
     if (isr & (USART_ISR_ORE | USART_ISR_FE | USART_ISR_NE)) {

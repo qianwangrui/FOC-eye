@@ -7,11 +7,9 @@
 
 CAN_NodeStats_t g_can_node = {0};
 
-/* Classic CAN 500 kbps: one broadcast frame, 6 x int8 angles (1 deg). */
 #define CAN_ANGLE_BATCH_ID      0x300U
-
 #define UART_BATCH_MAGIC        0xC6U
-#define UART_BATCH_LEN          (2U + CAN_MOTOR_COUNT)   /* magic, seq, 6 x int8 */
+#define UART_BATCH_LEN          (2U + CAN_MOTOR_COUNT)
 #define UART_BATCH_TIMEOUT_MS   50U
 
 static int8_t s_angles_deg[CAN_MOTOR_COUNT];
@@ -19,7 +17,7 @@ static uint8_t s_uart_rx_buf[UART_BATCH_LEN];
 static uint8_t s_uart_rx_idx = 0U;
 static uint32_t s_uart_last_byte_ms = 0U;
 
-static void gateway_uart_parser_reset(void)
+static void uart_batch_parser_reset(void)
 {
     s_uart_rx_idx = 0U;
 }
@@ -32,13 +30,12 @@ static float i8_to_deg(int8_t ang)
 static void pack_can_batch(uint8_t *out, uint8_t seq, const int8_t *angles)
 {
     out[0] = seq;
-    out[1] = 0x01U;   /* valid */
+    out[1] = 0x01U;
     for (uint8_t i = 0U; i < CAN_MOTOR_COUNT; i++) {
         out[2U + i] = (uint8_t)angles[i];
     }
 }
 
-#if !CAN_NODE_IS_GATEWAY
 static uint8_t parse_can_batch(const uint8_t *in, uint8_t rx_len, uint8_t *seq, int8_t *angles_out)
 {
     if (rx_len < 2U + CAN_MOTOR_COUNT || in[1] != 0x01U) {
@@ -54,7 +51,6 @@ static uint8_t parse_can_batch(const uint8_t *in, uint8_t rx_len, uint8_t *seq, 
     }
     return 1U;
 }
-#endif
 
 static void apply_local_angle(float deg, uint8_t seq)
 {
@@ -62,6 +58,7 @@ static void apply_local_angle(float deg, uint8_t seq)
     g_can_node.last_angle_deg = deg;
     g_can_node.last_seq       = seq;
     g_can_node.angle_rx_cnt++;
+    FOC_RequestAngle(deg);
 }
 
 static void on_can_batch(uint8_t seq, const int8_t *angles)
@@ -82,27 +79,26 @@ static uint8_t can_send_batch(uint8_t seq, const int8_t *angles)
     return 0U;
 }
 
-static void gateway_forward_batch(uint8_t seq)
+static void forward_uart_batch(uint8_t seq)
 {
     if (can_send_batch(seq, s_angles_deg)) {
-        /* Apply local motor only after the frame is on the bus (same as slave RX timing). */
+        /* TX node does not loop back into its own RX FIFO — apply locally here. */
         on_can_batch(seq, s_angles_deg);
     }
     g_can_node.batch_cnt++;
 }
 
-static void gateway_on_uart_batch(const uint8_t *buf)
+static void on_uart_batch(const uint8_t *buf)
 {
     uint8_t seq = buf[1];
 
     for (uint8_t i = 0U; i < CAN_MOTOR_COUNT; i++) {
         s_angles_deg[i] = (int8_t)buf[2U + i];
     }
-    gateway_forward_batch(seq);
+    forward_uart_batch(seq);
 }
 
-#if !CAN_NODE_IS_GATEWAY
-static void slave_poll_can(void)
+static void poll_can_rx(void)
 {
     uint8_t payload[8];
     uint32_t rx_id = 0U;
@@ -121,48 +117,30 @@ static void slave_poll_can(void)
         on_can_batch(seq, angles);
     }
 }
-#endif
 
-#if CAN_NODE_IS_GATEWAY
-static void gateway_poll_can(void)
+void CAN_ForwardAngles(const int8_t angles_deg[CAN_MOTOR_COUNT], uint8_t seq)
 {
-    uint8_t payload[8];
-    uint32_t rx_id = 0U;
-    uint8_t rx_len = 0U;
-
-    while (FDCAN_TryRecvStd(&rx_id, payload, &rx_len)) {
-        g_can_node.rx_cnt++;
-    }
-}
-#endif
-
-void CAN_GatewayForwardAngles(const int8_t angles_deg[CAN_MOTOR_COUNT], uint8_t seq)
-{
-#if CAN_NODE_IS_GATEWAY
-    gateway_uart_parser_reset();
+    uart_batch_parser_reset();
     if (angles_deg) {
         for (uint8_t i = 0U; i < CAN_MOTOR_COUNT; i++) {
             s_angles_deg[i] = angles_deg[i];
         }
-        gateway_forward_batch(seq);
+        forward_uart_batch(seq);
     }
-#else
-    (void)angles_deg;
-    (void)seq;
-#endif
 }
 
-uint8_t CAN_GatewayFeedUartByte(uint8_t byte)
+void CAN_GatewayForwardAngles(const int8_t angles_deg[CAN_MOTOR_COUNT], uint8_t seq)
 {
-#if !CAN_NODE_IS_GATEWAY
-    (void)byte;
-    return 0U;
-#else
+    CAN_ForwardAngles(angles_deg, seq);
+}
+
+uint8_t CAN_FeedUartByte(uint8_t byte)
+{
     uint32_t now = HAL_GetTick();
 
     if (s_uart_rx_idx != 0U &&
         (int32_t)(now - s_uart_last_byte_ms) > (int32_t)UART_BATCH_TIMEOUT_MS) {
-        gateway_uart_parser_reset();
+        uart_batch_parser_reset();
     }
     s_uart_last_byte_ms = now;
 
@@ -178,25 +156,25 @@ uint8_t CAN_GatewayFeedUartByte(uint8_t byte)
 
     s_uart_rx_buf[s_uart_rx_idx++] = byte;
     if (s_uart_rx_idx >= UART_BATCH_LEN) {
-        gateway_on_uart_batch(s_uart_rx_buf);
-        gateway_uart_parser_reset();
+        on_uart_batch(s_uart_rx_buf);
+        uart_batch_parser_reset();
     }
     return 1U;
-#endif
+}
+
+uint8_t CAN_GatewayFeedUartByte(uint8_t byte)
+{
+    return CAN_FeedUartByte(byte);
 }
 
 void CAN_NodeInit(void)
 {
     memset(&g_can_node, 0, sizeof(g_can_node));
-    gateway_uart_parser_reset();
+    uart_batch_parser_reset();
     s_uart_last_byte_ms = 0U;
 }
 
 void CAN_NodePoll(void)
 {
-#if CAN_NODE_IS_GATEWAY
-    gateway_poll_can();
-#else
-    slave_poll_can();
-#endif
+    poll_can_rx();
 }
