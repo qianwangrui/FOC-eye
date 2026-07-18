@@ -28,6 +28,23 @@ def pack_uart_batch(seq: int, angles_deg: list[float]) -> bytes:
     return struct.pack("<BB6b", UART_BATCH_MAGIC, seq & 0xFF, *ints)
 
 
+def pack_all_text(can_angles: list[int]) -> bytes:
+    """Text 'all' line — same path as VOFA / foc_console (CAN motor 0..5 order)."""
+    if len(can_angles) != MOTOR_COUNT:
+        raise ValueError(f"need exactly {MOTOR_COUNT} angles, got {len(can_angles)}")
+    line = "all " + " ".join(str(clamp_angle_deg(float(a))) for a in can_angles)
+    return (line + "\n").encode("ascii")
+
+
+def send_all_angles(ser, angles_deg: list[float]) -> str:
+    """Send text 'all' for 6 motors (CAN index 0..5). Returns the line sent."""
+    if len(angles_deg) != MOTOR_COUNT:
+        raise ValueError(f"need exactly {MOTOR_COUNT} angles, got {len(angles_deg)}")
+    line = "all " + " ".join(str(clamp_angle_deg(a)) for a in angles_deg)
+    send_text_line(ser, line)
+    return line
+
+
 def send_batch(ser, seq: int, angles_deg: list[float]) -> bytes:
     payload = pack_uart_batch(seq, angles_deg)
     ser.write(payload)

@@ -1,0 +1,36 @@
+name: Build FOC_eye GUI (Windows exe)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main, SVPWM]
+    paths:
+      - 'tools/motor_eye_gui.py'
+      - 'tools/foc_protocol.py'
+      - 'tools/motor_eye_gui.spec'
+      - 'tools/requirements-build.txt'
+      - '.github/workflows/build-gui-exe.yml'
+
+jobs:
+  build-win64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build deps
+        run: python -m pip install --upgrade pip && pip install -r tools/requirements-build.txt
+
+      - name: PyInstaller one-file exe
+        run: python -m PyInstaller --noconfirm --clean motor_eye_gui.spec
+        working-directory: tools
+
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FOC_eye_gui-win64
+          path: tools/dist/FOC_eye_gui.exe
+          retention-days: 90

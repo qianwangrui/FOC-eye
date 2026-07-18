@@ -144,14 +144,16 @@ uint8_t CAN_FeedUartByte(uint8_t byte)
     }
     s_uart_last_byte_ms = now;
 
-    if (byte == UART_BATCH_MAGIC) {
+    /* Only accept 0xC6 as frame start when idle. Mid-frame bytes may also
+     * be 0xC6 (int8 angle -58); treating them as magic desyncs the batch
+     * and maps angles to wrong motors. */
+    if (s_uart_rx_idx == 0U) {
+        if (byte != UART_BATCH_MAGIC) {
+            return 0U;
+        }
         s_uart_rx_buf[0] = byte;
         s_uart_rx_idx = 1U;
         return 1U;
-    }
-
-    if (s_uart_rx_idx == 0U) {
-        return 0U;
     }
 
     s_uart_rx_buf[s_uart_rx_idx++] = byte;

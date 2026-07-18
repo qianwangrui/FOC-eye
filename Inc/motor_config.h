@@ -7,7 +7,7 @@
 #if CAN_NODE_ID == 0
 #define MOTOR_PROFILE  1   /* node 0: 6 pole pairs */
 #else
-#define MOTOR_PROFILE  1   /* nodes 1..5: 6 pole pairs (eyelid) */
+#define MOTOR_PROFILE  0   /* nodes 1..5: 6 pole pairs (eyelid) */
 #endif
 
 #if MOTOR_PROFILE == 0
@@ -16,13 +16,13 @@
 #define MOTOR_ENC_DIR        (+1)
 
 #define MOTOR_PI_D_KP        1.0f
-#define MOTOR_PI_D_KI        5.0f
+#define MOTOR_PI_D_KI        4.0f
 #define MOTOR_PI_D_OUT_MAX   1.0f
 #define MOTOR_PI_Q_KP        2.0f
 #define MOTOR_PI_Q_KI        1.0f
 #define MOTOR_PI_Q_OUT_MAX   1.0f
 
-#define MOTOR_POS_KP         0.041f
+#define MOTOR_POS_KP         0.040f
 #define MOTOR_POS_KI         0.010f
 #define MOTOR_POS_KD         0.0002f
 #define MOTOR_IQ_MAX         1.0f
@@ -40,10 +40,10 @@
 #define MOTOR_PI_D_KI        0.0f
 #define MOTOR_PI_D_OUT_MAX   0.5f
 #define MOTOR_PI_Q_KP        0.8f
-#define MOTOR_PI_Q_KI        1.0f
+#define MOTOR_PI_Q_KI        0.0f
 #define MOTOR_PI_Q_OUT_MAX   2.0f
 
-#define MOTOR_POS_KP         0.07f
+#define MOTOR_POS_KP         0.08f
 #define MOTOR_POS_KI         0.000f
 #define MOTOR_POS_KD         0.0002f
 #define MOTOR_IQ_MAX         200.0f
@@ -61,9 +61,9 @@
 #define MOTOR_POS_DEADBAND_VEL_DEGS 15.0f
 #endif
 
-#define MOTOR_TORQUE_CMD_TIMEOUT_MS  3000U
+#define MOTOR_TORQUE_CMD_TIMEOUT_MS  1000U
 
-#define VOFA_TELEM_ENABLE            1
+#define VOFA_TELEM_ENABLE            0
 #define VOFA_TELEM_MS                10U
 
 #endif /* MOTOR_CONFIG_H */
